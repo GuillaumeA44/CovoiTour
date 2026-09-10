@@ -1,0 +1,315 @@
+COVOITOUR - CONSIGNES POUR GEMINI DANS ANDROID STUDIO
+========================================================
+
+Date de reference : 2026-09-10
+Projet : CovoiTour
+Dossier : C:\DevPerso\CovoiTour
+Plateforme actuelle : Android
+Technologie : Flutter / Dart
+Evolution prevue : iPhone plus tard, en conservant une architecture multiplateforme
+
+IMPORTANT
+---------
+Tu travailles sur un projet Flutter Android-first. Ne transforme pas ce projet en application Kotlin native. Android Studio sert a gerer le SDK Android, l'emulateur, les appareils et la compilation, mais le code applicatif doit rester en Dart/Flutter.
+
+Ne supprime pas les modifications existantes. Lis le code avant toute modification et conserve l'architecture deja commencee.
+
+OBJECTIF PRODUIT
+----------------
+CovoiTour est une application de covoiturage regulier entre les memes personnes pour un meme trajet.
+
+Slogan principal :
+"Le covoiturage equitable ou chacun conduit a son tour."
+
+Slogan court pour l'interface :
+"A qui le volant aujourd'hui ?"
+
+Direction visuelle demandee :
+- theme sombre premium ;
+- fond bleu nuit presque noir ;
+- accents vert neon et cyan ;
+- cartes sombres arrondies avec aspect vitre ;
+- interfaces mobiles inspirees des codes Uber, Tesla, Revolut et Apple ;
+- peu de texte, hierarchie claire ;
+- une information principale par zone ;
+- animations discretes et fluides ;
+- affichage immediat du conducteur recommande ;
+- suivi clair des participants ;
+- interface moderne Material 3.
+
+REGLES METIER A RESPECTER
+-------------------------
+1. Un trajet CovoiTour represente une journee aller-retour. L'aller et le retour sont comptabilises ensemble.
+2. Il n'y a pas de calcul de score pour un demi-trajet.
+3. Pour N passagers transportes :
+   - conducteur : +N points ;
+   - chaque passager : -1 point ;
+   - absent : 0 point ;
+   - somme totale : toujours 0.
+4. L'application propose un conducteur, mais le groupe peut confirmer un autre membre.
+5. Tous les membres actifs peuvent conduire si leur vehicule et leur capacite le permettent.
+6. En cas d'egalite, choisir la personne qui a conduit le moins recemment.
+7. Les scores sont separes selon le nombre de participants du trajet.
+8. Un membre qui rejoint commence avec 0 et ne modifie pas l'historique passe.
+9. Un membre qui quitte est archive, mais son historique et ses scores restent conserves.
+10. L'administrateur peut corriger les scores, modifier une journee ancienne ou annuler une journee.
+11. Toute modification doit conserver une somme de scores egale a 0 et etre tracee dans l'historique.
+12. Les membres doivent declarer present, absent ou non repondu avant le trajet.
+13. Un rappel de declaration doit etre prevu deux jours avant le trajet.
+
+ARCHITECTURE EXISTANTE
+----------------------
+Le projet suit une separation progressive :
+
+lib/
+  main.dart
+  data/
+    repositories/
+      drive_sync_result.dart
+      google_drive_document_repository.dart
+    serialization/
+      carpool_json_codec.dart
+  domain/
+    entities/
+      advanced_trip.dart
+      group.dart
+      member.dart
+      trip.dart
+    repositories/
+      document_repository.dart
+    services/
+      equity_service.dart
+      location_service.dart
+      multi_vehicle_service.dart
+      notification_service.dart
+      statistics_service.dart
+  presentation/
+    providers/
+      app_state.dart
+      app_state_import.dart
+
+test/
+  equity_service_test.dart
+  advanced_services_test.dart
+
+assets/
+  images/
+    hebus_tech_logo.png
+
+Fichiers importants a lire avant de coder :
+- lib/main.dart : interface actuelle, navigation et ecrans principaux ;
+- lib/presentation/providers/app_state.dart : etat local actuel ;
+- lib/domain/services/equity_service.dart : calcul d'equite ;
+- lib/domain/entities/group.dart : modele de groupe et export JSON ;
+- lib/data/serialization/carpool_json_codec.dart : codec JSON ;
+- pubspec.yaml : dependances et assets ;
+- README.md : installation et compilation ;
+- CompilationRelease.bat : compilation APK release ;
+- TransfertRelease.bat : installation APK via ADB.
+
+ETAT ACTUEL DU PROJET
+---------------------
+Deja present :
+- projet Flutter initialise au niveau des fichiers Dart et de la configuration ;
+- Android-first mais code pense pour etre multiplateforme ;
+- Material 3 avec theme sombre premium ;
+- ecran Accueil ;
+- navigation basse Accueil / Groupe / Equite / Historique ;
+- declaration Present / Absent / Non repondu ;
+- ajout simple d'un membre ;
+- vehicule et capacite dans le modele ;
+- suggestion du conducteur ;
+- confirmation d'un conducteur ;
+- calcul +N / -1 ;
+- scores separes par taille de groupe ;
+- historique local basique ;
+- repartition multi-vehicules de base ;
+- statistiques de base ;
+- export JSON versionne de base ;
+- abstraction Google Drive ;
+- contrats pour notifications et geolocalisation ;
+- ecran A propos inspire de SeriesTracker ;
+- logo Hebus Tech copie localement dans assets/images ;
+- scripts Windows de compilation et transfert ;
+- tests unitaires du calcul d'equite et de la repartition multi-vehicules.
+
+Encore incomplet ou non branche :
+- dossier Android genere par Flutter si absent ;
+- execution reelle de flutter pub get et flutter test sur ce poste ;
+- authentification Google OAuth ;
+- lecture/ecriture reelle dans Google Drive ;
+- partage du fichier avec les membres ;
+- gestion des conflits de revision Google Drive ;
+- invitations par lien ou code ;
+- persistance locale complete ;
+- ecrans complets de creation et modification de groupe ;
+- edition complete des membres et vehicules ;
+- modification manuelle des scores par l'administrateur ;
+- modification et annulation d'une ancienne journee dans l'interface ;
+- historique d'administration ;
+- notifications Android reelles ;
+- import et restauration JSON complets ;
+- regles d'attente et penalites ;
+- statistiques mensuelles completes ;
+- multi-vehicules complet dans l'interface ;
+- geolocalisation reelle et partage temporaire ;
+- carte et statut de retard ;
+- tests d'integration et validation APK release.
+
+INSTALLATION DE L'ENVIRONNEMENT
+--------------------------------
+Installer sur le poste de developpement :
+
+1. Flutter stable, qui contient Dart.
+2. Android Studio version recente.
+3. Android SDK.
+4. Android SDK Platform Tools, incluant adb.
+5. Un JDK compatible avec la version du projet Android genere par Flutter.
+6. Git.
+
+Dans Android Studio :
+- installer les plugins Flutter et Dart ;
+- verifier le chemin du Flutter SDK ;
+- verifier le SDK Android ;
+- connecter un telephone Android ou creer un emulateur ;
+- activer le debogage USB sur le telephone si necessaire.
+
+VERIFICATIONS OBLIGATOIRES AVANT DE CODER
+-----------------------------------------
+Depuis PowerShell, a la racine du projet :
+
+  flutter --version
+  dart --version
+  flutter doctor -v
+  git status --short
+
+Si le dossier android/ n'existe pas encore, executer une seule fois :
+
+  flutter create --org com.covoitour --project-name covoi_tour --platforms=android .
+
+Le package Android attendu est :
+
+  com.covoitour.covoi_tour
+
+Ensuite executer :
+
+  flutter pub get
+  flutter analyze
+  flutter test
+
+Puis lancer sur un appareil :
+
+  flutter devices
+  flutter run
+
+IMPORTANT : ne pas lancer `flutter create` si le dossier Android a deja ete genere, sauf apres avoir verifie les consequences. Ne pas ecraser les fichiers applicatifs existants.
+
+COMPILATION RELEASE
+-------------------
+Pour generer un APK installable :
+
+  CompilationRelease.bat
+
+APK attendu :
+
+  build\app\outputs\flutter-apk\app-release.apk
+
+Pour installer l'APK sur un telephone autorise :
+
+  TransfertRelease.bat
+
+Pour une installation propre :
+
+  TransfertRelease.bat --clean
+
+Pour la publication Play Store, generer plutot un AAB :
+
+  flutter build appbundle --release
+
+Ne jamais commiter :
+- android/local.properties ;
+- fichiers .jks, .keystore ou .p12 ;
+- secrets OAuth ;
+- dossiers build/ et .dart_tool/ ;
+- tokens ou cles privees.
+
+ORDRE DE TRAVAIL DEMANDE
+------------------------
+ETAPE 1 - TERMINER LA VERSION 1 LOCALE
+1. Verifier et corriger la compilation Flutter.
+2. Completer les modeles et la serialisation JSON aller-retour.
+3. Implementer la persistance locale complete.
+4. Implementer la creation, modification et suppression logique d'un groupe.
+5. Implementer l'ajout, la modification, l'archivage et la capacite des membres.
+6. Implementer les declarations de presence avec date limite.
+7. Implementer la suggestion et la confirmation du conducteur.
+8. Implementer le recalcul des scores apres modification d'une journee.
+9. Implementer la modification manuelle des scores par l'administrateur avec verification du total egal a 0.
+10. Implementer l'historique des trajets et des corrections.
+11. Ajouter les tests unitaires et tests de widgets necessaires.
+
+ETAPE 2 - GOOGLE DRIVE ET ADMINISTRATION
+1. Creer/configurer un projet Google Cloud uniquement lorsque le code local est stable.
+2. Ajouter OAuth Android avec le package et l'empreinte SHA-1 de la release.
+3. Ajouter la connexion Google sans stocker de secret prive dans l'application.
+4. Implementer lecture du fichier JSON de l'administrateur.
+5. Implementer creation, partage et mise a jour du fichier.
+6. Verifier la revision du fichier avant toute ecriture.
+7. Refuser l'ecriture et demander une resynchronisation en cas de conflit.
+8. Implementer invitations, roles et droits.
+9. Implementer changement d'administrateur avec archive et conservation de l'historique.
+10. Implementer export, import et restauration avec validation de schema.
+
+ETAPE 3 - VERSION 2
+1. Implementer le calcul du nombre de vehicules necessaires.
+2. Implementer la selection de plusieurs conducteurs.
+3. Implementer la repartition des passagers dans les vehicules.
+4. Ajouter regles d'attente, retards et penalites par groupe.
+5. Ajouter statistiques par mois.
+6. Ajouter rappels de presence et de trajet avec notifications locales Android.
+7. Tester les cas limites : aucun conducteur, capacite insuffisante, egalites, absences et groupe incomplet.
+
+ETAPE 4 - VERSION 3
+1. Ajouter les permissions de localisation Android.
+2. Activer la localisation seulement 15 minutes avant le depart et jusqu'au depart.
+3. Permettre le partage temporaire de position uniquement aux participants.
+4. Ajouter statut a l'heure, retard estime et tres en retard.
+5. Ajouter une carte avec point de depart, participants et conducteurs.
+6. Ajouter suppression automatique du partage apres le depart.
+7. Tester batterie, permissions refusees, perte reseau et donnees obsoletes.
+
+REGLES DE CODE
+--------------
+- Utiliser Dart null-safe et les API Flutter modernes.
+- Respecter l'architecture domain/data/presentation.
+- Ne pas mettre d'appel Google Drive directement dans un widget.
+- Ne pas melanger logique metier et rendu.
+- Preferer des services et repositories testables.
+- Ajouter un test avant de modifier une regle d'equite.
+- Ne pas introduire Firebase ni Supabase.
+- Ne pas remplacer Google Drive par une base serveur.
+- Ne pas ajouter de secrets dans Git.
+- Conserver le theme sombre premium et les accents vert/cyan.
+- Ne pas utiliser de grandes phrases explicatives dans l'interface : privilegier titres courts, icones et etats clairs.
+- Avant chaque modification importante, executer au minimum `flutter analyze` puis `flutter test`.
+- Apres toute modification, verifier `git diff` et `git status --short`.
+
+PREMIERE MISSION POUR GEMINI
+----------------------------
+1. Lire ce fichier, README.md, pubspec.yaml et lib/main.dart.
+2. Executer les verifications d'environnement.
+3. Signaler clairement les commandes qui echouent.
+4. Si Flutter est disponible, executer `flutter pub get`, `flutter analyze` et `flutter test`.
+5. Corriger uniquement les erreurs bloqueuses de compilation ou de tests.
+6. Ne pas commencer Google OAuth avant que la version locale compile et que les tests passent.
+7. Proposer ensuite le prochain petit lot de la version 1 et l'implementer avec ses tests.
+
+RESULTAT ATTENDU
+----------------
+A la fin de chaque session, fournir :
+- les fichiers modifies ;
+- les fonctionnalites ajoutees ;
+- les commandes executees ;
+- les tests passes ou echoues ;
+- les points restant a traiter ;
+- les secrets ou configurations manuelles encore necessaires.
