@@ -17,8 +17,35 @@ class CovoiTourApp extends StatelessWidget {
       title: 'CovoiTour',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal),
+        brightness: Brightness.dark,
+        scaffoldBackgroundColor: const Color(0xFF050C18),
+        colorScheme: const ColorScheme.dark(
+          primary: Color(0xFF24D58A),
+          onPrimary: Color(0xFF03150F),
+          secondary: Color(0xFF32B5FF),
+          surface: Color(0xFF0B1626),
+          surfaceContainer: Color(0xFF101D30),
+          onSurface: Color(0xFFF3F7FA),
+          onSurfaceVariant: Color(0xFFA2B0C1),
+        ),
         useMaterial3: true,
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Color(0xFF050C18),
+          foregroundColor: Color(0xFFF3F7FA),
+          elevation: 0,
+        ),
+        navigationBarTheme: const NavigationBarThemeData(
+          backgroundColor: Color(0xFF07111F),
+          indicatorColor: Color(0xFF123C36),
+          labelTextStyle: WidgetStatePropertyAll(
+            TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+          ),
+        ),
+        cardTheme: CardThemeData(
+          color: const Color(0xFF0C192A).withAlpha(235),
+          elevation: 0,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        ),
       ),
       home: const HomeShell(),
     );
@@ -49,9 +76,9 @@ class _HomeShellState extends ConsumerState<HomeShell> {
         selectedIndex: selectedIndex,
         onDestinationSelected: (index) => setState(() => selectedIndex = index),
         destinations: const [
-          NavigationDestination(icon: Icon(Icons.route), label: 'Trajet'),
-          NavigationDestination(icon: Icon(Icons.groups), label: 'Membres'),
-          NavigationDestination(icon: Icon(Icons.leaderboard), label: 'Scores'),
+          NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: 'Accueil'),
+          NavigationDestination(icon: Icon(Icons.groups_outlined), selectedIcon: Icon(Icons.groups), label: 'Groupe'),
+          NavigationDestination(icon: Icon(Icons.balance_outlined), selectedIcon: Icon(Icons.balance), label: 'Équité'),
           NavigationDestination(icon: Icon(Icons.history), label: 'Historique'),
         ],
       ),
@@ -69,7 +96,7 @@ class DashboardScreen extends ConsumerWidget {
     final recommendation = state.recommendDriver();
     return Scaffold(
       appBar: AppBar(
-        title: Text(state.group.name),
+        title: const Text('CovoiTour', style: TextStyle(fontWeight: FontWeight.w700)),
         actions: [
           IconButton(
             tooltip: 'À propos',
@@ -82,26 +109,65 @@ class DashboardScreen extends ConsumerWidget {
         ],
       ),
       body: ListView(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
         children: [
-          Text(
-            'Prochain trajet',
-            style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 16),
-          Card(child: ListTile(
-            leading: Icon(Icons.calendar_month),
-            title: Text('Lundi 14 septembre'),
-            subtitle: Text('Maison -> Bureau | 08:00 / 18:00'),
-          )),
+          Text('Bonjour, ${state.group.members.first.name.split(' ').first}',
+              style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: Colors.white70)),
+          const SizedBox(height: 6),
+          Text('À qui le volant aujourd’hui ?',
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800)),
+          const SizedBox(height: 20),
+          _RouteHeader(groupName: state.group.name),
+          const SizedBox(height: 12),
+          Row(children: [
+            Expanded(child: _MetricCard(icon: Icons.groups_rounded, value: '${trip.presentMemberIds.length}', label: 'participants', color: const Color(0xFF24D58A))),
+            const SizedBox(width: 12),
+            Expanded(child: _MetricCard(icon: Icons.directions_car_filled_rounded, value: '1', label: 'voiture nécessaire', color: const Color(0xFF32B5FF))),
+          ]),
           const SizedBox(height: 12),
           Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
+            clipBehavior: Clip.antiAlias,
+            child: Container(
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(colors: [Color(0xFF0D8F68), Color(0xFF075348)], begin: Alignment.topLeft, end: Alignment.bottomRight),
+              ),
+              padding: const EdgeInsets.fromLTRB(16, 18, 16, 16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Présences', style: TextStyle(fontWeight: FontWeight.bold)),
+                  Text('Conducteur recommandé', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
+                  const SizedBox(height: 4),
+                  const Text('Basé sur l’équité du groupe', style: TextStyle(color: Colors.white70)),
+                  const SizedBox(height: 14),
+                  if (recommendation != null)
+                    _DriverRow(
+                      name: state.group.members.firstWhere((member) => member.id == recommendation).name,
+                      score: state.scoresFor(trip.presentMemberIds.length)[recommendation] ?? 0,
+                    ),
+                  const SizedBox(height: 14),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton(
+                      style: FilledButton.styleFrom(backgroundColor: const Color(0xFF32D891), foregroundColor: const Color(0xFF032017)),
+                      onPressed: recommendation == null ? null : () => ref.read(appStateProvider).confirmDriver(recommendation),
+                      child: const Text('Valider le trajet', style: TextStyle(fontWeight: FontWeight.w800)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                    Text('Présences', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
+                    Text('${trip.presentMemberIds.length}/${trip.participants.length}', style: const TextStyle(color: Color(0xFF24D58A), fontWeight: FontWeight.w700)),
+                  ]),
                   const SizedBox(height: 8),
                   ...trip.participants.map((participant) => _AttendanceTile(
                         participant: participant,
@@ -137,6 +203,71 @@ class DashboardScreen extends ConsumerWidget {
     );
   }
 }
+
+class _RouteHeader extends StatelessWidget {
+  const _RouteHeader({required this.groupName});
+
+  final String groupName;
+
+  @override
+  Widget build(BuildContext context) => Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(children: [
+            const Icon(Icons.calendar_today_rounded, color: Color(0xFF24D58A)),
+            const SizedBox(width: 12),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Demain, lundi 14 sept.', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+              const SizedBox(height: 4),
+              Text('$groupName  •  Aller 08:00  •  Retour 18:00', style: const TextStyle(color: Colors.white60)),
+            ])),
+          ]),
+        ),
+      );
+}
+
+class _MetricCard extends StatelessWidget {
+  const _MetricCard({required this.icon, required this.value, required this.label, required this.color});
+
+  final IconData icon;
+  final String value;
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) => Card(child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Row(children: [
+          CircleAvatar(backgroundColor: color.withAlpha(28), child: Icon(icon, color: color)),
+          const SizedBox(width: 10),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(value, style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
+            Text(label, style: const TextStyle(color: Colors.white60, fontSize: 12)),
+          ])),
+        ]),
+      ));
+}
+
+class _DriverRow extends StatelessWidget {
+  const _DriverRow({required this.name, required this.score});
+
+  final String name;
+  final int score;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(color: Colors.black.withAlpha(28), borderRadius: BorderRadius.circular(14)),
+        child: Row(children: [
+          const CircleAvatar(backgroundColor: Color(0xFFE7D2C5), child: Icon(Icons.person, color: Color(0xFF5C4033))),
+          const SizedBox(width: 12),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(name, style: const TextStyle(fontWeight: FontWeight.w800)),
+            Text('Score $score', style: const TextStyle(color: Colors.white70)),
+          ])),
+          const Icon(Icons.workspace_premium_rounded, color: Color(0xFF8BFFBC)),
+        ]),
+      );
 
 class _AttendanceTile extends StatelessWidget {
   const _AttendanceTile({required this.participant, required this.memberName, required this.onChanged});
