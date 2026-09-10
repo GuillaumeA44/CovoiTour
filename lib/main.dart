@@ -70,7 +70,16 @@ class DashboardScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(
         title: Text(state.group.name),
-        actions: [IconButton(onPressed: () {}, icon: const Icon(Icons.sync))],
+        actions: [
+          IconButton(
+            tooltip: 'À propos',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const AboutScreen()),
+            ),
+            icon: const Icon(Icons.info_outline),
+          ),
+          IconButton(onPressed: () {}, icon: const Icon(Icons.sync)),
+        ],
       ),
       body: ListView(
         padding: const EdgeInsets.all(20),
@@ -265,6 +274,109 @@ class HistoryScreen extends ConsumerWidget {
             subtitle: Text('$driver - ${trip.presentMemberIds.length} présents'),
           ));
         },
+      ),
+    );
+  }
+}
+
+class AboutScreen extends StatelessWidget {
+  const AboutScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('À propos')),
+      body: ListView(
+        padding: const EdgeInsets.all(24),
+        children: [
+          const SizedBox(height: 16),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: Image.asset(
+              'assets/images/hebus_tech_logo.png',
+              height: 80,
+              fit: BoxFit.contain,
+            ),
+          ),
+          const SizedBox(height: 20),
+          const Text(
+            'CovoiTour',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 30, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Le covoiturage équitable où chacun conduit à son tour.',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Version 0.1.0',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+          ),
+          const SizedBox(height: 32),
+          Card(
+            color: Theme.of(context).colorScheme.primaryContainer.withAlpha(50),
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                children: [
+                  const Text(
+                    'À propos de l’application',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'CovoiTour aide les groupes de covoiturage réguliers à organiser les trajets, déclarer les présences et répartir équitablement les journées de conduite.',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Les données du groupe sont destinées à être stockées dans le fichier partagé de son administrateur.',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          fontWeight: FontWeight.bold,
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'Développé par',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+          ),
+          const SizedBox(height: 8),
+          Image.asset(
+            'assets/images/hebus_tech_logo.png',
+            height: 120,
+            fit: BoxFit.contain,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Hebus Tech',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+          ),
+          const SizedBox(height: 32),
+          Text(
+            '© 2026 Hebus Tech',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ],
       ),
     );
   }
