@@ -85,8 +85,11 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     if (state.isLoading) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
+    if (!state.hasGroup) {
+      return const CreateGroupScreen();
+    }
 
-    final isAdmin = state.currentUser != null || state.group.adminId == state.activeMembers.firstOrNull?.id;
+    final isAdmin = state.isCurrentUserAdmin;
 
     final pages = [
       const DashboardScreen(),
@@ -95,16 +98,17 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       const PresenceScreen(),
       if (isAdmin) const MainAdminScreen(),
     ];
+    final visibleIndex = selectedIndex >= pages.length ? pages.length - 1 : selectedIndex;
 
     return Scaffold(
-      body: pages[selectedIndex],
+      body: pages[visibleIndex],
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
           border: Border(top: BorderSide(color: Colors.white.withValues(alpha: 0.05), width: 1)),
         ),
         child: NavigationBar(
           height: 65,
-          selectedIndex: selectedIndex,
+          selectedIndex: visibleIndex,
           onDestinationSelected: (index) => setState(() => selectedIndex = index),
           destinations: [
             const NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: 'Accueil'),
@@ -116,6 +120,143 @@ class _HomeShellState extends ConsumerState<HomeShell> {
         ),
       ),
     );
+  }
+}
+
+class CreateGroupScreen extends ConsumerStatefulWidget {
+  const CreateGroupScreen({super.key});
+
+  @override
+  ConsumerState<CreateGroupScreen> createState() => _CreateGroupScreenState();
+}
+
+class _CreateGroupScreenState extends ConsumerState<CreateGroupScreen> {
+  final _formKey = GlobalKey<FormState>();
+  final _nameController = TextEditingController();
+  final _descriptionController = TextEditingController();
+  final _startController = TextEditingController();
+  final _endController = TextEditingController();
+  final _outboundController = TextEditingController();
+  final _returnController = TextEditingController();
+  bool _isCreating = false;
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _descriptionController.dispose();
+    _startController.dispose();
+    _endController.dispose();
+    _outboundController.dispose();
+    _returnController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final state = ref.watch(appStateProvider);
+    final account = state.currentUser;
+
+    return Scaffold(
+      body: FullPageBackground(
+        imageUrl: 'https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?q=80&w=1000',
+        child: SafeArea(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(24, 40, 24, 40),
+            children: [
+              const CovoiTourLogo(size: 28),
+              const SizedBox(height: 40),
+              const Text('Créer votre groupe', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              const Text('Le créateur du groupe devient automatiquement son administrateur.', style: TextStyle(color: Colors.white70)),
+              const SizedBox(height: 32),
+              if (account == null)
+                _buildSignInCard(state)
+              else
+                Form(
+                  key: _formKey,
+                  child: Column(
+                    children: [
+                      _buildField(_nameController, 'Nom du groupe', Icons.groups_outlined, required: true),
+                      _buildField(_descriptionController, 'Description', Icons.notes_outlined),
+                      _buildField(_startController, 'Point de départ', Icons.trip_origin, required: true),
+                      _buildField(_endController, 'Destination', Icons.location_on_outlined, required: true),
+                      Row(
+                        children: [
+                          Expanded(child: _buildField(_outboundController, 'Heure aller', Icons.schedule, required: true)),
+                          const SizedBox(width: 12),
+                          Expanded(child: _buildField(_returnController, 'Heure retour', Icons.schedule_outlined, required: true)),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 56,
+                        child: FilledButton.icon(
+                          onPressed: _isCreating ? null : _createGroup,
+                          icon: _isCreating
+                              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                              : const Icon(Icons.add_circle_outline),
+                          label: const Text('Créer le groupe'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSignInCard(AppState state) => Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.06),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: Colors.white10),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Connexion requise', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            const Text('Connectez-vous avec Google pour devenir le propriétaire du groupe et synchroniser ses données.', style: TextStyle(color: Colors.white70)),
+            const SizedBox(height: 16),
+            FilledButton.icon(
+              onPressed: () => state.signIn(),
+              icon: const Icon(Icons.login),
+              label: const Text('Se connecter à Google'),
+            ),
+          ],
+        ),
+      );
+
+  Widget _buildField(TextEditingController controller, String label, IconData icon, {bool required = false}) => Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: TextFormField(
+          controller: controller,
+          decoration: InputDecoration(labelText: label, prefixIcon: Icon(icon)),
+          validator: required ? (value) => value == null || value.trim().isEmpty ? 'Champ requis' : null : null,
+        ),
+      );
+
+  Future<void> _createGroup() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() => _isCreating = true);
+    final created = await ref.read(appStateProvider).createGroup(
+          name: _nameController.text,
+          description: _descriptionController.text,
+          startPoint: _startController.text,
+          endPoint: _endController.text,
+          outboundTime: _outboundController.text,
+          returnTime: _returnController.text,
+        );
+    if (!mounted) return;
+    setState(() => _isCreating = false);
+    if (!created) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Impossible de créer le groupe.')));
+    }
   }
 }
 
@@ -440,6 +581,64 @@ class GroupScreen extends ConsumerWidget {
                 children: [
                   const CovoiTourLogo(size: 24),
                   const SizedBox(height: 32),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.05),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: Colors.white10),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          state.currentUser == null ? Icons.cloud_off : Icons.cloud_done,
+                          color: const Color(0xFF24D58A),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                state.currentUser?.displayName ?? 'Compte Google non connecté',
+                                style: const TextStyle(fontWeight: FontWeight.bold),
+                              ),
+                              Text(
+                                state.currentUser == null
+                                    ? 'Connectez-vous pour synchroniser le groupe'
+                                    : state.isCurrentUserAdmin
+                                        ? 'Synchronisation Google Drive active'
+                                        : 'Compte connecté, synchronisation réservée à l’administrateur',
+                                style: const TextStyle(color: Colors.white54, fontSize: 12),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (state.currentUser == null)
+                          IconButton(
+                            onPressed: () => state.signIn(),
+                            icon: const Icon(Icons.login, color: Color(0xFF24D58A)),
+                            tooltip: 'Se connecter à Google',
+                          )
+                        else ...[
+                          if (state.isCurrentUserAdmin)
+                            IconButton(
+                              onPressed: state.isSyncing ? null : () => state.syncWithDrive(),
+                              icon: state.isSyncing
+                                  ? const SizedBox(
+                                      width: 20,
+                                      height: 20,
+                                      child: CircularProgressIndicator(strokeWidth: 2),
+                                    )
+                                  : const Icon(Icons.sync, color: Color(0xFF24D58A)),
+                              tooltip: 'Synchroniser avec Google Drive',
+                            ),
+                          TextButton(onPressed: () => state.signOut(), child: const Text('Déconnexion')),
+                        ],
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 24),
                   Text('${group.startPoint} ➔ ${group.endPoint}', style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 24),
                   const Text('Infos trajet', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
@@ -694,17 +893,7 @@ class PresenceScreen extends ConsumerWidget {
   const PresenceScreen({super.key});
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final state = ref.watch(appStateProvider);
     return Scaffold(
-      extendBodyBehindAppBar: true,
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        actions: [
-          if (state.currentUser != null) IconButton(onPressed: state.isSyncing ? null : () => state.syncWithDrive(), icon: state.isSyncing ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.sync, color: Color(0xFF24D58A)))
-          else IconButton(onPressed: () => state.signIn(), icon: const Icon(Icons.login, color: Color(0xFF24D58A))),
-        ],
-      ),
       body: FullPageBackground(
         imageUrl: 'https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?q=80&w=1000',
         child: ListView(
@@ -715,7 +904,6 @@ class PresenceScreen extends ConsumerWidget {
             const SizedBox(height: 20),
             const Text('Ma présence', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white)),
             const SizedBox(height: 32),
-            if (state.currentUser != null) Padding(padding: const EdgeInsets.only(bottom: 24), child: Row(children: [CircleAvatar(backgroundImage: NetworkImage(state.currentUser!.photoUrl ?? '')), const SizedBox(width: 12), Text(state.currentUser!.displayName ?? '', style: const TextStyle(fontWeight: FontWeight.bold)), const Spacer(), TextButton(onPressed: () => state.signOut(), child: const Text('Déconnexion'))])),
             _StatusItem(icon: Icons.check_circle, title: 'Présent', subtitle: 'Je participe au trajet', color: const Color(0xFF24D58A), isSelected: false, onTap: () => _openCalendar(context, AttendanceStatus.present)),
             _StatusItem(icon: Icons.laptop_mac_rounded, title: 'Télétravail', subtitle: 'Je travaille à distance', color: const Color(0xFF32B5FF), isSelected: false, onTap: () => _openCalendar(context, AttendanceStatus.telework)),
             _StatusItem(icon: Icons.home_rounded, title: 'Absent', subtitle: 'Je ne suis pas disponible', color: Colors.white30, isSelected: false, onTap: () => _openCalendar(context, AttendanceStatus.absent)),
@@ -738,9 +926,14 @@ class SharedCalendarScreen extends ConsumerStatefulWidget {
   ConsumerState<SharedCalendarScreen> createState() => _SharedCalendarScreenState();
 }
 
+enum _CalendarSelectionMode { individual, range }
+
 class _SharedCalendarScreenState extends ConsumerState<SharedCalendarScreen> {
   DateTime _focusedDay = DateTime.now();
   final Set<DateTime> _selectedDays = {};
+  _CalendarSelectionMode _selectionMode = _CalendarSelectionMode.individual;
+  DateTime? _rangeStart;
+  DateTime? _rangeEnd;
 
   @override
   void initState() {
@@ -787,6 +980,31 @@ class _SharedCalendarScreenState extends ConsumerState<SharedCalendarScreen> {
         child: Column(
           children: [
             const SizedBox(height: 100),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: SegmentedButton<_CalendarSelectionMode>(
+                segments: const [
+                  ButtonSegment(value: _CalendarSelectionMode.individual, icon: Icon(Icons.event), label: Text('Jours')),
+                  ButtonSegment(value: _CalendarSelectionMode.range, icon: Icon(Icons.date_range), label: Text('Période')),
+                ],
+                selected: {_selectionMode},
+                onSelectionChanged: (selection) {
+                  setState(() {
+                    _selectionMode = selection.first;
+                    _selectedDays.clear();
+                    _rangeStart = null;
+                    _rangeEnd = null;
+                  });
+                },
+                style: ButtonStyle(
+                  foregroundColor: WidgetStateProperty.all(Colors.white),
+                  backgroundColor: WidgetStateProperty.resolveWith((states) {
+                    return states.contains(WidgetState.selected) ? const Color(0xFF24D58A).withValues(alpha: 0.22) : Colors.white10;
+                  }),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
             TableCalendar(
               locale: 'fr_FR',
               firstDay: DateTime.now().subtract(const Duration(days: 365)),
@@ -794,6 +1012,11 @@ class _SharedCalendarScreenState extends ConsumerState<SharedCalendarScreen> {
               focusedDay: _focusedDay,
               calendarFormat: CalendarFormat.month,
               startingDayOfWeek: StartingDayOfWeek.monday,
+                rangeStartDay: _rangeStart,
+                rangeEndDay: _rangeEnd,
+                rangeSelectionMode: _selectionMode == _CalendarSelectionMode.range
+                  ? RangeSelectionMode.toggledOn
+                  : RangeSelectionMode.toggledOff,
               selectedDayPredicate: (day) => _selectedDays.any((d) => isSameDay(d, day)),
               enabledDayPredicate: (day) => !state.group.offDays.contains(day.weekday),
               headerStyle: const HeaderStyle(
@@ -808,6 +1031,10 @@ class _SharedCalendarScreenState extends ConsumerState<SharedCalendarScreen> {
                 weekendTextStyle: const TextStyle(color: Colors.white70),
                 outsideTextStyle: const TextStyle(color: Colors.white24),
                 disabledTextStyle: const TextStyle(color: Colors.white12),
+                disabledDecoration: BoxDecoration(
+                  color: Colors.white10,
+                  shape: BoxShape.circle,
+                ),
                 todayDecoration: BoxDecoration(
                   color: const Color(0xFF24D58A).withValues(alpha: 0.2),
                   shape: BoxShape.circle,
@@ -823,6 +1050,10 @@ class _SharedCalendarScreenState extends ConsumerState<SharedCalendarScreen> {
                 ),
               ),
               onDaySelected: (selectedDay, focusedDay) {
+                if (_selectionMode != _CalendarSelectionMode.individual ||
+                    state.group.offDays.contains(selectedDay.weekday)) {
+                  return;
+                }
                 setState(() {
                   _focusedDay = focusedDay;
                   bool alreadySelected = false;
@@ -838,6 +1069,24 @@ class _SharedCalendarScreenState extends ConsumerState<SharedCalendarScreen> {
                     _selectedDays.remove(toRemove);
                   } else {
                     _selectedDays.add(selectedDay);
+                  }
+                });
+              },
+              onRangeSelected: (start, end, focusedDay) {
+                if (_selectionMode != _CalendarSelectionMode.range) return;
+                setState(() {
+                  _focusedDay = focusedDay;
+                  _rangeStart = start;
+                  _rangeEnd = end;
+                  _selectedDays.clear();
+
+                  if (start == null || end == null) return;
+                  for (var day = DateTime(start.year, start.month, start.day);
+                      !day.isAfter(end);
+                      day = day.add(const Duration(days: 1))) {
+                    if (!state.group.offDays.contains(day.weekday)) {
+                      _selectedDays.add(day);
+                    }
                   }
                 });
               },
@@ -889,7 +1138,7 @@ class _SharedCalendarScreenState extends ConsumerState<SharedCalendarScreen> {
                     ),
                     onPressed: () => _validateSelection(member.id),
                     child: Text(
-                      'Valider les jours de ${_getTitle().toLowerCase()}', 
+                      'Valider (${_selectedDays.length} ${_selectedDays.length == 1 ? 'jour' : 'jours'})',
                       style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)
                     ),
                   ),
@@ -908,10 +1157,21 @@ class _SharedCalendarScreenState extends ConsumerState<SharedCalendarScreen> {
 
     final sortedDays = _selectedDays.toList()..sort((a, b) => a.compareTo(b));
 
-    return ListView.builder(
-      padding: const EdgeInsets.symmetric(horizontal: 24),
-      itemCount: sortedDays.length,
-      itemBuilder: (context, index) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(24, 0, 24, 4),
+          child: Text(
+            '${sortedDays.length} ${sortedDays.length == 1 ? 'jour sélectionné' : 'jours sélectionnés'}',
+            style: const TextStyle(color: Color(0xFF24D58A), fontWeight: FontWeight.bold),
+          ),
+        ),
+        Expanded(
+          child: ListView.builder(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            itemCount: sortedDays.length,
+            itemBuilder: (context, index) {
         final day = sortedDays[index];
         return Padding(
           padding: const EdgeInsets.symmetric(vertical: 8.0),
@@ -939,7 +1199,10 @@ class _SharedCalendarScreenState extends ConsumerState<SharedCalendarScreen> {
             ],
           ),
         );
-      },
+            },
+          ),
+        ),
+      ],
     );
   }
 
@@ -1104,6 +1367,22 @@ class _AdminScreenState extends ConsumerState<AdminScreen> {
     final state = ref.watch(appStateProvider);
     return ListView(padding: const EdgeInsets.fromLTRB(24, 20, 24, 100), children: [
       Text('Infos du groupe', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)), const SizedBox(height: 16),
+      Text(
+        'Administrateur : ${state.group.members.where((member) => member.id == state.group.adminId).firstOrNull?.name ?? 'Non défini'}',
+        style: const TextStyle(color: Colors.white70),
+      ),
+      const SizedBox(height: 12),
+      Builder(
+        builder: (context) {
+          final candidates = state.activeMembers.where((member) => member.id != state.group.adminId).toList();
+          return FilledButton.icon(
+            onPressed: candidates.isEmpty ? null : () => _showAdminTransferDialog(context, ref, candidates),
+            icon: const Icon(Icons.admin_panel_settings_outlined),
+            label: const Text('Transférer les droits administrateur'),
+          );
+        },
+      ),
+      const SizedBox(height: 32),
       TextField(controller: _name, decoration: const InputDecoration(labelText: 'Nom')), TextField(controller: _desc, decoration: const InputDecoration(labelText: 'Description')),
       TextField(controller: _start, decoration: const InputDecoration(labelText: 'Départ')), TextField(controller: _end, decoration: const InputDecoration(labelText: 'Arrivée')),
       Row(children: [Expanded(child: TextField(controller: _out, decoration: const InputDecoration(labelText: 'Aller'))), const SizedBox(width: 16), Expanded(child: TextField(controller: _ret, decoration: const InputDecoration(labelText: 'Retour')))]),
@@ -1122,6 +1401,41 @@ class _AdminScreenState extends ConsumerState<AdminScreen> {
       FilledButton.icon(onPressed: () { state.updateGroup(name: _name.text, description: _desc.text, startPoint: _start.text, endPoint: _end.text, outboundTime: _out.text, returnTime: _ret.text, offDays: state.group.offDays); ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Config enregistrée'))); }, icon: const Icon(Icons.save), label: const Text('Enregistrer tout')),
     ]);
   }
+  Future<void> _showAdminTransferDialog(BuildContext context, WidgetRef ref, List<Member> candidates) async {
+    var selectedId = candidates.first.id;
+    final result = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) => AlertDialog(
+          title: const Text('Transférer les droits'),
+          content: DropdownButtonFormField<String>(
+            initialValue: selectedId,
+            decoration: const InputDecoration(labelText: 'Nouveau administrateur'),
+            items: candidates
+                .map((member) => DropdownMenuItem(value: member.id, child: Text(member.name)))
+                .toList(),
+            onChanged: (value) {
+              if (value != null) setDialogState(() => selectedId = value);
+            },
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Annuler')),
+            FilledButton(onPressed: () => Navigator.pop(dialogContext, selectedId), child: const Text('Transférer')),
+          ],
+        ),
+      ),
+    );
+
+    if (result == null || !context.mounted) return;
+    final transferred = await ref.read(appStateProvider).transferAdmin(result);
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(transferred ? 'Droits administrateur transférés' : 'Transfert impossible : synchronisation échouée'),
+      ),
+    );
+  }
+
   void _toggleDay(int day, bool off) { final days = List<int>.from(ref.read(appStateProvider).group.offDays); if (off && !days.contains(day)) days.add(day); else if (!off) days.remove(day); ref.read(appStateProvider).updateGroup(name: _name.text, description: _desc.text, startPoint: _start.text, endPoint: _end.text, outboundTime: _out.text, returnTime: _ret.text, offDays: days); }
 }
 

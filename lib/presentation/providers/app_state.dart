@@ -26,7 +26,8 @@ class AppState extends ChangeNotifier {
   }
 
   CarpoolGroup? _group;
-  CarpoolGroup get group => _group ?? _initialGroup();
+  CarpoolGroup get group => _group ?? _emptyGroup();
+  bool get hasGroup => _group != null;
 
   String? _lastKnownRevision;
   
@@ -39,6 +40,15 @@ class AppState extends ChangeNotifier {
 
   GoogleSignInAccount? _currentUser;
   GoogleSignInAccount? get currentUser => _currentUser;
+
+  bool get isCurrentUserAdmin {
+    final email = _currentUser?.email;
+    if (email == null) return false;
+
+    return group.members.any(
+      (member) => member.id == group.adminId && member.email.toLowerCase() == email.toLowerCase(),
+    );
+  }
 
   bool _isLoading = true;
   bool get isLoading => _isLoading;
@@ -59,11 +69,78 @@ class AppState extends ChangeNotifier {
   Future<void> signIn() => _authService.signIn();
   Future<void> signOut() => _authService.signOut();
 
+  Future<bool> createGroup({
+    required String name,
+    required String description,
+    required String startPoint,
+    required String endPoint,
+    required String outboundTime,
+    required String returnTime,
+  }) async {
+    final account = _currentUser;
+    if (account == null || name.trim().isEmpty) return false;
+
+    final displayName = account.displayName?.trim() ?? '';
+    final nameParts = displayName.isEmpty ? [account.email.split('@').first] : displayName.split(RegExp(r'\s+'));
+    final memberId = 'member-${DateTime.now().millisecondsSinceEpoch}';
+    final creator = Member(
+      id: memberId,
+      firstName: nameParts.first,
+      lastName: nameParts.length > 1 ? nameParts.skip(1).join(' ') : '',
+      email: account.email,
+      avatarUrl: account.photoUrl,
+    );
+
+    _group = CarpoolGroup(
+      id: 'group-${DateTime.now().millisecondsSinceEpoch}',
+      name: name.trim(),
+      description: description.trim(),
+      startPoint: startPoint.trim(),
+      endPoint: endPoint.trim(),
+      outboundTime: outboundTime.trim(),
+      returnTime: returnTime.trim(),
+      adminId: memberId,
+      members: [creator],
+      trips: [],
+      scoresByGroupSize: {},
+    );
+    await _save();
+    notifyListeners();
+    return true;
+  }
+
   Future<void> syncWithDrive() async {
-    if (_currentUser == null) return;
+    if (_currentUser == null || !isCurrentUserAdmin) return;
+    await _syncWithDrive();
+  }
+
+  Future<bool> transferAdmin(String newAdminId) async {
+    if (!isCurrentUserAdmin ||
+        newAdminId == group.adminId ||
+        !group.members.any((member) => member.id == newAdminId && member.isActive)) {
+      return false;
+    }
+
+    final previousAdminId = group.adminId;
+    group.adminId = newAdminId;
+    await _save();
+
+    if (await _syncWithDrive(forceUpload: true)) {
+      notifyListeners();
+      return true;
+    }
+
+    group.adminId = previousAdminId;
+    await _save();
+    notifyListeners();
+    return false;
+  }
+
+  Future<bool> _syncWithDrive({bool forceUpload = false}) async {
     _isSyncing = true;
     notifyListeners();
 
+    var success = false;
     try {
       final authHeaders = await _currentUser!.authHeaders;
       final client = GoogleAuthClient(authHeaders);
@@ -72,7 +149,7 @@ class AppState extends ChangeNotifier {
 
       final remoteRevision = await driveRepo.getLatestRevisionId();
 
-      if (remoteRevision != null && remoteRevision != _lastKnownRevision) {
+      if (remoteRevision != null && remoteRevision != _lastKnownRevision && !forceUpload) {
         // Le fichier a été modifié par quelqu'un d'autre
         final driveJson = await driveRepo.readDocument('default');
         final decoded = codec.decode(driveJson);
@@ -92,12 +169,14 @@ class AppState extends ChangeNotifier {
         // Mettre à jour la révision après écriture
         _lastKnownRevision = await driveRepo.getLatestRevisionId();
       }
+      success = true;
     } catch (e) {
       debugPrint('Erreur de synchronisation : $e');
     } finally {
       _isSyncing = false;
       notifyListeners();
     }
+    return success;
   }
 
   void updateGroup({
@@ -403,56 +482,19 @@ class AppState extends ChangeNotifier {
     return DateTime.fromMillisecondsSinceEpoch(0);
   }
 
-  static CarpoolGroup _initialGroup() {
-    final members = <Member>[
-      const Member(
-        id: 'member-1',
-        firstName: 'Alice',
-        lastName: 'Martin',
-        email: 'alice@example.com',
-        hasVehicle: true,
-        passengerCapacity: 3,
-      ),
-      const Member(
-        id: 'member-2',
-        firstName: 'Benoit',
-        lastName: 'Durand',
-        email: 'benoit@example.com',
-        hasVehicle: true,
-        passengerCapacity: 4,
-      ),
-      const Member(
-        id: 'member-3',
-        firstName: 'Chloe',
-        lastName: 'Bernard',
-        email: 'chloe@example.com',
-      ),
-    ];
+  static CarpoolGroup _emptyGroup() {
     return CarpoolGroup(
-      id: 'group-1',
-      name: 'Trajet bureau',
-      description: 'Covoiturage quotidien vers le bureau.',
-      startPoint: 'Maison',
-      endPoint: 'Bureau',
-      outboundTime: '08:00',
-      returnTime: '18:00',
-      adminId: 'member-1',
-      members: members,
-      trips: [
-        Trip(
-          id: 'trip-next',
-          date: DateTime(2026, 9, 14),
-          participants: [
-            const TripParticipant(memberId: 'member-1', status: AttendanceStatus.present),
-            const TripParticipant(memberId: 'member-2', status: AttendanceStatus.present),
-            const TripParticipant(memberId: 'member-3', status: AttendanceStatus.notAnswered),
-          ],
-        ),
-      ],
-      scoresByGroupSize: {
-        2: {'member-1': 0, 'member-2': 0},
-        3: {'member-1': 0, 'member-2': 0, 'member-3': 0},
-      },
+      id: '',
+      name: '',
+      description: '',
+      startPoint: '',
+      endPoint: '',
+      outboundTime: '',
+      returnTime: '',
+      adminId: '',
+      members: [],
+      trips: [],
+      scoresByGroupSize: {},
     );
   }
 }
