@@ -8,10 +8,10 @@ class StatisticsService {
   }) {
     final result = <String, MemberStatistics>{};
     for (final trip in trips) {
-      final driverId = trip.confirmedDriverId;
+      final driverIds = trip.confirmedDriverIds;
       for (final participant in trip.presentMemberIds) {
         final previous = result[participant] ?? const MemberStatistics(driverCount: 0, passengerCount: 0, score: 0);
-        final isDriver = participant == driverId;
+        final isDriver = driverIds.contains(participant);
         result[participant] = MemberStatistics(
           driverCount: previous.driverCount + (isDriver ? 1 : 0),
           passengerCount: previous.passengerCount + (isDriver ? 0 : 1),

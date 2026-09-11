@@ -81,14 +81,21 @@ Pour publier sur Google Play, utiliser de preference :
 flutter build appbundle --release
 ```
 
-## Google Drive
+## Google Drive Configuration (Phase 2)
 
-La version cible utilise un fichier JSON partage dans le Google Drive de l'administrateur. Le branchement necessitera :
+To enable synchronization, you must configure a Google Cloud project:
 
-- un projet Google Cloud ;
-- OAuth Android avec le nom de package final et l'empreinte SHA-1 ;
-- les scopes Drive strictement necessaires ;
-- une strategie de version/revision avant chaque ecriture ;
-- une sauvegarde avant modification importante.
-
-Aucun secret Google ne doit etre committe dans Git.
+1.  **Google Cloud Console**:
+    *   Create a project.
+    *   Enable the **Google Drive API**.
+    *   Configure the **OAuth Consent Screen** (External, add `.../auth/drive.file` and `.../auth/drive.appdata` scopes).
+2.  **Credentials**:
+    *   Create an **OAuth 2.0 Client ID** for **Android**.
+    *   Use the package name: `com.covoitour`.
+    *   Use the SHA-1 fingerprint of your debug keystore:
+        ```powershell
+        keytool -list -v -keystore $HOME/.android/debug.keystore -alias androiddebugkey -storepass android -keypass android
+        ```
+3.  **Android Integration**:
+    *   The `google_sign_in` plugin is already added.
+    *   Ensure your `android/app/build.gradle` has the correct `applicationId`.

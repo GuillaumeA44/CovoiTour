@@ -8,9 +8,9 @@ void main() {
   test('repartit les passagers dans plusieurs vehicules', () {
     final plan = MultiVehicleService().plan(
       drivers: const [
-        Member(id: 'a', name: 'A', email: 'a@x.fr', hasVehicle: true, passengerCapacity: 4),
-        Member(id: 'b', name: 'B', email: 'b@x.fr', hasVehicle: true, passengerCapacity: 4),
-        Member(id: 'c', name: 'C', email: 'c@x.fr', hasVehicle: true, passengerCapacity: 2),
+        Member(id: 'a', firstName: 'A', lastName: '', email: 'a@x.fr', hasVehicle: true, passengerCapacity: 4),
+        Member(id: 'b', firstName: 'B', lastName: '', email: 'b@x.fr', hasVehicle: true, passengerCapacity: 4),
+        Member(id: 'c', firstName: 'C', lastName: '', email: 'c@x.fr', hasVehicle: true, passengerCapacity: 2),
       ],
       passengerIds: const ['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7', 'p8', 'p9'],
       scores: const {'a': 2, 'b': 0, 'c': -1},

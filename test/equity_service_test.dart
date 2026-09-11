@@ -35,9 +35,9 @@ void main() {
       ],
     );
     final members = [
-      const Member(id: 'small', name: 'Small', email: 'small@example.com', hasVehicle: true, passengerCapacity: 1),
-      const Member(id: 'large', name: 'Large', email: 'large@example.com', hasVehicle: true, passengerCapacity: 2),
-      const Member(id: 'passenger', name: 'Passenger', email: 'passenger@example.com'),
+      const Member(id: 'small', firstName: 'Small', lastName: '', email: 'small@example.com', hasVehicle: true, passengerCapacity: 1),
+      const Member(id: 'large', firstName: 'Large', lastName: '', email: 'large@example.com', hasVehicle: true, passengerCapacity: 2),
+      const Member(id: 'passenger', firstName: 'Passenger', lastName: '', email: 'passenger@example.com'),
     ];
 
     expect(
