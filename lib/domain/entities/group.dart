@@ -15,6 +15,8 @@ class CarpoolGroup {
     required this.trips,
     required this.scoresByGroupSize,
     this.offDays = const [6, 7], // Samedi et Dimanche par défaut
+    this.imageData,
+    this.acknowledgedUnvalidatedTripIds = const [],
   });
 
   final String id;
@@ -29,6 +31,8 @@ class CarpoolGroup {
   final List<Trip> trips;
   final Map<int, Map<String, int>> scoresByGroupSize;
   List<int> offDays;
+  String? imageData;
+  List<String> acknowledgedUnvalidatedTripIds;
 
   factory CarpoolGroup.fromJson(Map<String, dynamic> json) {
     final scoresData = json['scoresByGroupSize'] as Map<String, dynamic>? ?? {};
@@ -56,6 +60,8 @@ class CarpoolGroup {
           .toList(),
       scoresByGroupSize: scores,
       offDays: (json['offDays'] as List?)?.map((e) => e as int).toList() ?? const [6, 7],
+      imageData: json['imageData'] as String?,
+      acknowledgedUnvalidatedTripIds: (json['acknowledgedUnvalidatedTripIds'] as List? ?? []).map((e) => e as String).toList(),
     );
   }
 
@@ -69,6 +75,8 @@ class CarpoolGroup {
         'returnTime': returnTime,
         'adminId': adminId,
         'offDays': offDays,
+        'imageData': imageData,
+        'acknowledgedUnvalidatedTripIds': acknowledgedUnvalidatedTripIds,
         'members': members
             .map((member) => {
                   'id': member.id,

@@ -46,13 +46,14 @@ class Member {
     bool? hasVehicle,
     int? passengerCapacity,
     bool? isActive,
+    bool clearAvatar = false,
   }) =>
       Member(
         id: id,
         firstName: firstName ?? this.firstName,
         lastName: lastName ?? this.lastName,
         email: email ?? this.email,
-        avatarUrl: avatarUrl ?? this.avatarUrl,
+        avatarUrl: clearAvatar ? null : (avatarUrl ?? this.avatarUrl),
         hasVehicle: hasVehicle ?? this.hasVehicle,
         passengerCapacity: passengerCapacity ?? this.passengerCapacity,
         isActive: isActive ?? this.isActive,

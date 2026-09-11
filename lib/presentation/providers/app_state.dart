@@ -50,6 +50,25 @@ class AppState extends ChangeNotifier {
     );
   }
 
+  List<Trip> get pastUnvalidatedTrips {
+    final today = DateTime.now();
+    final startOfToday = DateTime(today.year, today.month, today.day);
+    return group.trips.where((trip) {
+      final tripDate = DateTime(trip.date.year, trip.date.month, trip.date.day);
+      return tripDate.isBefore(startOfToday) &&
+          trip.confirmedDriverIds.isEmpty &&
+          !group.acknowledgedUnvalidatedTripIds.contains(trip.id);
+    }).toList()
+      ..sort((left, right) => right.date.compareTo(left.date));
+  }
+
+  void acknowledgeUnvalidatedTrip(String tripId) {
+    if (!isCurrentUserAdmin || group.acknowledgedUnvalidatedTripIds.contains(tripId)) return;
+    group.acknowledgedUnvalidatedTripIds.add(tripId);
+    _save();
+    notifyListeners();
+  }
+
   bool _isLoading = true;
   bool get isLoading => _isLoading;
   
@@ -76,6 +95,8 @@ class AppState extends ChangeNotifier {
     required String endPoint,
     required String outboundTime,
     required String returnTime,
+    required int passengerCapacity,
+    String? imageData,
   }) async {
     final account = _currentUser;
     if (account == null || name.trim().isEmpty) return false;
@@ -89,6 +110,8 @@ class AppState extends ChangeNotifier {
       lastName: nameParts.length > 1 ? nameParts.skip(1).join(' ') : '',
       email: account.email,
       avatarUrl: account.photoUrl,
+      hasVehicle: true,
+      passengerCapacity: passengerCapacity,
     );
 
     _group = CarpoolGroup(
@@ -103,6 +126,7 @@ class AppState extends ChangeNotifier {
       members: [creator],
       trips: [],
       scoresByGroupSize: {},
+      imageData: imageData,
     );
     await _save();
     notifyListeners();
@@ -187,6 +211,7 @@ class AppState extends ChangeNotifier {
     required String outboundTime,
     required String returnTime,
     List<int>? offDays,
+    String? imageData,
   }) {
     group.name = name;
     group.description = description;
@@ -196,6 +221,9 @@ class AppState extends ChangeNotifier {
     group.returnTime = returnTime;
     if (offDays != null) {
       group.offDays = offDays;
+    }
+    if (imageData != null) {
+      group.imageData = imageData;
     }
     _save();
     notifyListeners();
@@ -261,10 +289,33 @@ class AppState extends ChangeNotifier {
   void updateMember(Member updatedMember) {
     final index = group.members.indexWhere((m) => m.id == updatedMember.id);
     if (index >= 0) {
+      final previousMember = group.members[index];
       group.members[index] = updatedMember;
+      if (previousMember.hasVehicle != updatedMember.hasVehicle ||
+          previousMember.passengerCapacity != updatedMember.passengerCapacity) {
+        _invalidateUpcomingAssignment(updatedMember.id);
+      }
       _save();
       notifyListeners();
     }
+  }
+
+  void _invalidateUpcomingAssignment(String memberId) {
+    final today = DateTime.now();
+    final upcomingTrips = group.trips.where((trip) {
+      final tripDate = DateTime(trip.date.year, trip.date.month, trip.date.day);
+      return !tripDate.isBefore(DateTime(today.year, today.month, today.day)) &&
+          trip.confirmedDriverIds.contains(memberId);
+    }).toList()
+      ..sort((left, right) => left.date.compareTo(right.date));
+
+    if (upcomingTrips.isEmpty) return;
+    final trip = upcomingTrips.first;
+    final tripIndex = group.trips.indexOf(trip);
+    group.trips[tripIndex] = trip.copyWith(
+      suggestedDriverIds: const [],
+      confirmedDriverIds: const [],
+    );
   }
 
   void archiveMember(String memberId) {
@@ -383,8 +434,16 @@ class AppState extends ChangeNotifier {
     );
   }
 
+  bool canValidateTrip(DateTime tripDate) {
+    final today = DateTime.now();
+    final normalizedToday = DateTime(today.year, today.month, today.day);
+    final normalizedTripDate = DateTime(tripDate.year, tripDate.month, tripDate.day);
+    return !normalizedTripDate.isAfter(normalizedToday);
+  }
+
   void confirmDriver(String memberId) {
     final trip = _nextTrip();
+    if (!canValidateTrip(trip.date)) return;
     final presentCount = trip.presentMemberIds.length;
     if (presentCount < 2) return;
     final result = equityService.calculateTripPoints(trip: trip, driverId: memberId);
@@ -414,6 +473,7 @@ class AppState extends ChangeNotifier {
 
   void confirmPlan(TripPlan plan) {
     final trip = _nextTrip();
+    if (!canValidateTrip(trip.date) || plan.assignments.isEmpty) return;
     
     for (final assignment in plan.assignments) {
       final tripForEquity = trip.copyWith(participants: [

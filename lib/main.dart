@@ -1,8 +1,12 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:table_calendar/table_calendar.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:geocoding/geocoding.dart';
 
 import 'domain/entities/trip.dart';
 import 'domain/entities/member.dart';
@@ -138,7 +142,20 @@ class _CreateGroupScreenState extends ConsumerState<CreateGroupScreen> {
   final _endController = TextEditingController();
   final _outboundController = TextEditingController();
   final _returnController = TextEditingController();
+  final _capacityController = TextEditingController();
   bool _isCreating = false;
+  String? _groupImageData;
+  bool _startAddressVerified = false;
+  bool _endAddressVerified = false;
+  bool _isCheckingStartAddress = false;
+  bool _isCheckingEndAddress = false;
+  String? _startAddressError;
+  String? _endAddressError;
+  List<String> _startSuggestions = [];
+  List<String> _endSuggestions = [];
+  int _addressSearchToken = 0;
+  TimeOfDay? _outboundTime;
+  TimeOfDay? _returnTime;
 
   @override
   void dispose() {
@@ -148,6 +165,7 @@ class _CreateGroupScreenState extends ConsumerState<CreateGroupScreen> {
     _endController.dispose();
     _outboundController.dispose();
     _returnController.dispose();
+    _capacityController.dispose();
     super.dispose();
   }
 
@@ -177,15 +195,27 @@ class _CreateGroupScreenState extends ConsumerState<CreateGroupScreen> {
                   child: Column(
                     children: [
                       _buildField(_nameController, 'Nom du groupe', Icons.groups_outlined, required: true),
+                      _buildGroupImagePicker(),
                       _buildField(_descriptionController, 'Description', Icons.notes_outlined),
-                      _buildField(_startController, 'Point de départ', Icons.trip_origin, required: true),
-                      _buildField(_endController, 'Destination', Icons.location_on_outlined, required: true),
+                      _buildAddressField(_startController, 'Point de départ', Icons.trip_origin, true),
+                      _buildAddressField(_endController, 'Point de retour', Icons.location_on_outlined, false),
                       Row(
                         children: [
-                          Expanded(child: _buildField(_outboundController, 'Heure aller', Icons.schedule, required: true)),
+                          Expanded(child: _buildTimeField('Heure de départ', Icons.schedule, true)),
                           const SizedBox(width: 12),
-                          Expanded(child: _buildField(_returnController, 'Heure retour', Icons.schedule_outlined, required: true)),
+                          Expanded(child: _buildTimeField('Heure de retour', Icons.schedule_outlined, false)),
                         ],
+                      ),
+                      _buildField(
+                        _capacityController,
+                        'Places disponibles dans la voiture (hors conducteur)',
+                        Icons.airline_seat_recline_normal_outlined,
+                        required: true,
+                        keyboardType: TextInputType.number,
+                        validator: (value) {
+                          final capacity = int.tryParse(value?.trim() ?? '');
+                          return capacity == null || capacity < 1 ? 'Indiquez au moins 1 place' : null;
+                        },
                       ),
                       const SizedBox(height: 16),
                       SizedBox(
@@ -232,17 +262,243 @@ class _CreateGroupScreenState extends ConsumerState<CreateGroupScreen> {
         ),
       );
 
-  Widget _buildField(TextEditingController controller, String label, IconData icon, {bool required = false}) => Padding(
+  Widget _buildGroupImagePicker() => Padding(
         padding: const EdgeInsets.only(bottom: 12),
-        child: TextFormField(
-          controller: controller,
-          decoration: InputDecoration(labelText: label, prefixIcon: Icon(icon)),
-          validator: required ? (value) => value == null || value.trim().isEmpty ? 'Champ requis' : null : null,
+        child: ListTile(
+          contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: const BorderSide(color: Colors.white10)),
+          leading: _groupImageData == null
+              ? const CircleAvatar(child: Icon(Icons.groups_outlined))
+              : CircleAvatar(child: ClipOval(child: _ImageSource(source: _groupImageData!, size: 40))),
+          title: const Text('Image du groupe'),
+          subtitle: Text(_groupImageData == null ? 'Ajouter une photo ou un fichier' : 'Image sélectionnée'),
+          trailing: const Icon(Icons.add_a_photo_outlined),
+          onTap: () async {
+            final image = await _pickImageData(context);
+            if (image != null) setState(() => _groupImageData = image);
+          },
         ),
       );
 
+  Widget _buildField(
+    TextEditingController controller,
+    String label,
+    IconData icon, {
+    bool required = false,
+    TextInputType? keyboardType,
+    String? Function(String?)? validator,
+  }) => Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: TextFormField(
+          controller: controller,
+          keyboardType: keyboardType,
+          decoration: InputDecoration(labelText: label, prefixIcon: Icon(icon)),
+          validator: validator ?? (required ? (value) => value == null || value.trim().isEmpty ? 'Champ requis' : null : null),
+        ),
+      );
+
+  Widget _buildAddressField(TextEditingController controller, String label, IconData icon, bool isStart) {
+    final suggestions = isStart ? _startSuggestions : _endSuggestions;
+    final error = isStart ? _startAddressError : _endAddressError;
+    final verified = isStart ? _startAddressVerified : _endAddressVerified;
+    final checking = isStart ? _isCheckingStartAddress : _isCheckingEndAddress;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        children: [
+          TextFormField(
+            controller: controller,
+            decoration: InputDecoration(
+              labelText: label,
+              prefixIcon: Icon(icon),
+              suffixIcon: checking
+                  ? const Padding(padding: EdgeInsets.all(12), child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)))
+                  : IconButton(
+                      icon: Icon(verified ? Icons.verified : Icons.search, color: verified ? const Color(0xFF24D58A) : null),
+                      tooltip: 'Vérifier l’adresse',
+                      onPressed: () => _verifyAddress(controller, isStart),
+                    ),
+              errorText: error,
+              helperText: verified ? 'Adresse reconnue' : 'Saisissez une adresse puis sélectionnez une suggestion',
+            ),
+            onChanged: (value) => _suggestAddress(value, isStart),
+            validator: (value) => value == null || value.trim().isEmpty ? 'Adresse requise' : null,
+          ),
+          if (suggestions.isNotEmpty)
+            Container(
+              decoration: BoxDecoration(color: const Color(0xFF0C192A), borderRadius: BorderRadius.circular(12)),
+              child: Column(
+                children: suggestions.map((suggestion) => ListTile(
+                  dense: true,
+                  leading: const Icon(Icons.location_on_outlined, size: 18),
+                  title: Text(suggestion),
+                  onTap: () {
+                    controller.text = suggestion;
+                    setState(() {
+                      if (isStart) {
+                        _startSuggestions = [];
+                        _startAddressVerified = true;
+                        _startAddressError = null;
+                      } else {
+                        _endSuggestions = [];
+                        _endAddressVerified = true;
+                        _endAddressError = null;
+                      }
+                    });
+                  },
+                )).toList(),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTimeField(String label, IconData icon, bool isOutbound) => Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: TextFormField(
+          readOnly: true,
+          controller: isOutbound ? _outboundController : _returnController,
+          decoration: InputDecoration(labelText: label, prefixIcon: Icon(icon), suffixIcon: const Icon(Icons.access_time)),
+          onTap: () => _pickTime(isOutbound),
+          validator: (value) => value == null || value.isEmpty ? 'Requis' : null,
+        ),
+      );
+
+  String _formatTime(TimeOfDay time) => '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
+
+  Future<void> _pickTime(bool isOutbound) async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: isOutbound ? (_outboundTime ?? const TimeOfDay(hour: 8, minute: 0)) : (_returnTime ?? const TimeOfDay(hour: 18, minute: 0)),
+      helpText: isOutbound ? 'Choisir l’heure de départ' : 'Choisir l’heure de retour',
+      builder: (context, child) => MediaQuery(data: MediaQuery.of(context).copyWith(alwaysUse24HourFormat: true), child: child!),
+    );
+    if (picked == null) return;
+    final minutes = picked.hour * 60 + picked.minute;
+    if (!isOutbound && _outboundTime != null && minutes <= _outboundTime!.hour * 60 + _outboundTime!.minute) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('L’heure de retour doit être après l’heure de départ.')));
+      return;
+    }
+    setState(() {
+      if (isOutbound) {
+        _outboundTime = picked;
+        _outboundController.text = _formatTime(picked);
+        if (_returnTime != null && _returnTime!.hour * 60 + _returnTime!.minute <= minutes) {
+          _returnTime = null;
+          _returnController.clear();
+        }
+      } else {
+        _returnTime = picked;
+        _returnController.text = _formatTime(picked);
+      }
+    });
+  }
+
+  Future<void> _suggestAddress(String value, bool isStart) async {
+    final token = ++_addressSearchToken;
+    if (value.trim().length < 3) {
+      setState(() {
+        if (isStart) {
+          _startSuggestions = [];
+          _startAddressVerified = false;
+        } else {
+          _endSuggestions = [];
+          _endAddressVerified = false;
+        }
+      });
+      return;
+    }
+
+    try {
+      final places = await locationFromAddress(value.trim());
+      if (!mounted || token != _addressSearchToken) return;
+      final suggestions = places.take(4).map((place) {
+        return [place.street, place.postalCode, place.locality, place.country]
+            .whereType<String>()
+            .where((part) => part.isNotEmpty)
+            .join(', ');
+      }).where((address) => address.isNotEmpty).toSet().toList();
+      setState(() {
+        if (isStart) {
+          _startSuggestions = suggestions;
+          _startAddressVerified = false;
+        } else {
+          _endSuggestions = suggestions;
+          _endAddressVerified = false;
+        }
+      });
+    } catch (_) {
+      if (!mounted || token != _addressSearchToken) return;
+      setState(() {
+        if (isStart) {
+          _startSuggestions = [];
+          _startAddressVerified = false;
+        } else {
+          _endSuggestions = [];
+          _endAddressVerified = false;
+        }
+      });
+    }
+  }
+
+  Future<void> _verifyAddress(TextEditingController controller, bool isStart) async {
+    if (controller.text.trim().isEmpty) return;
+    setState(() {
+      if (isStart) {
+        _isCheckingStartAddress = true;
+        _startAddressError = null;
+      } else {
+        _isCheckingEndAddress = true;
+        _endAddressError = null;
+      }
+    });
+    try {
+      final places = await locationFromAddress(controller.text.trim());
+      if (!mounted) return;
+      if (places.isEmpty) throw const FormatException();
+      final place = places.first;
+      final formatted = [place.street, place.postalCode, place.locality, place.country]
+          .whereType<String>()
+          .where((part) => part.isNotEmpty)
+          .join(', ');
+      setState(() {
+        controller.text = formatted.isEmpty ? controller.text.trim() : formatted;
+        if (isStart) {
+          _startAddressVerified = true;
+          _startSuggestions = [];
+          _isCheckingStartAddress = false;
+        } else {
+          _endAddressVerified = true;
+          _endSuggestions = [];
+          _isCheckingEndAddress = false;
+        }
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        if (isStart) {
+          _isCheckingStartAddress = false;
+          _startAddressVerified = false;
+          _startAddressError = 'Adresse introuvable. Choisissez une suggestion ou précisez-la.';
+        } else {
+          _isCheckingEndAddress = false;
+          _endAddressVerified = false;
+          _endAddressError = 'Adresse introuvable. Choisissez une suggestion ou précisez-la.';
+        }
+      });
+    }
+  }
+
   Future<void> _createGroup() async {
     if (!_formKey.currentState!.validate()) return;
+    if (!_startAddressVerified || !_endAddressVerified) {
+      setState(() {
+        _startAddressError = _startAddressVerified ? null : 'Vérifiez cette adresse avant de continuer.';
+        _endAddressError = _endAddressVerified ? null : 'Vérifiez cette adresse avant de continuer.';
+      });
+      return;
+    }
     setState(() => _isCreating = true);
     final created = await ref.read(appStateProvider).createGroup(
           name: _nameController.text,
@@ -251,6 +507,8 @@ class _CreateGroupScreenState extends ConsumerState<CreateGroupScreen> {
           endPoint: _endController.text,
           outboundTime: _outboundController.text,
           returnTime: _returnController.text,
+          passengerCapacity: int.parse(_capacityController.text.trim()),
+          imageData: _groupImageData,
         );
     if (!mounted) return;
     setState(() => _isCreating = false);
@@ -345,7 +603,11 @@ class MemberAvatar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (member.avatarUrl != null && member.avatarUrl!.isNotEmpty) {
-      return CircleAvatar(radius: radius, backgroundImage: NetworkImage(member.avatarUrl!), backgroundColor: Colors.white12);
+      return CircleAvatar(
+        radius: radius,
+        backgroundColor: Colors.white12,
+        child: ClipOval(child: _ImageSource(source: member.avatarUrl!, size: radius * 2)),
+      );
     }
     return CircleAvatar(
       radius: radius,
@@ -353,6 +615,69 @@ class MemberAvatar extends StatelessWidget {
       child: Text(member.initials, style: TextStyle(color: const Color(0xFF24D58A), fontWeight: FontWeight.bold, fontSize: radius * 0.8)),
     );
   }
+}
+
+class _ImageSource extends StatelessWidget {
+  const _ImageSource({required this.source, required this.size});
+  final String source;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    if (source.startsWith('data:image/')) {
+      final separator = source.indexOf(',');
+      if (separator > 0) {
+        try {
+          return Image.memory(
+            base64Decode(source.substring(separator + 1)),
+            width: size,
+            height: size,
+            fit: BoxFit.cover,
+          );
+        } catch (_) {
+          return const Icon(Icons.broken_image_outlined);
+        }
+      }
+    }
+    return Image.network(source, width: size, height: size, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.broken_image_outlined));
+  }
+}
+
+Future<String?> _pickImageData(BuildContext context) async {
+  final source = await showModalBottomSheet<ImageSource>(
+    context: context,
+    builder: (sheetContext) => SafeArea(
+      child: Wrap(
+        children: [
+          ListTile(leading: const Icon(Icons.photo_library_outlined), title: const Text('Choisir un fichier'), onTap: () => Navigator.pop(sheetContext, ImageSource.gallery)),
+          ListTile(leading: const Icon(Icons.camera_alt_outlined), title: const Text('Prendre une photo'), onTap: () => Navigator.pop(sheetContext, ImageSource.camera)),
+        ],
+      ),
+    ),
+  );
+  if (source == null) return null;
+
+  final file = await ImagePicker().pickImage(source: source, imageQuality: 80, maxWidth: 1600, maxHeight: 1600);
+  if (file == null) return null;
+  final bytes = await file.readAsBytes();
+  final extension = file.name.toLowerCase().split('.').last;
+  final mime = extension == 'png' ? 'png' : extension == 'webp' ? 'webp' : 'jpeg';
+  return 'data:image/$mime;base64,${base64Encode(bytes)}';
+}
+
+Future<void> _editGroupImage(BuildContext context, WidgetRef ref) async {
+  final image = await _pickImageData(context);
+  if (image == null || !context.mounted) return;
+  final state = ref.read(appStateProvider);
+  state.updateGroup(
+    name: state.group.name,
+    description: state.group.description,
+    startPoint: state.group.startPoint,
+    endPoint: state.group.endPoint,
+    outboundTime: state.group.outboundTime,
+    returnTime: state.group.returnTime,
+    imageData: image,
+  );
 }
 
 // --- SCREENS ---
@@ -372,6 +697,7 @@ class DashboardScreen extends ConsumerWidget {
 
     final trip = trips.first;
     final plan = state.recommendPlan();
+    final canValidate = state.canValidateTrip(trip.date);
     final dateFormat = DateFormat('EEEE d MMM', 'fr_FR');
     
     return Scaffold(
@@ -395,19 +721,30 @@ class DashboardScreen extends ConsumerWidget {
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
-                        Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(12)),
-                          child: IconButton(
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(),
-                            onPressed: () {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Pas de nouvelles notifications')),
-                              );
-                            },
-                            icon: const Icon(Icons.notifications_none_rounded, color: Colors.white, size: 20),
-                          ),
+                        Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(12)),
+                              child: IconButton(
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(),
+                                onPressed: () => _showPastTripNotifications(context, state.pastUnvalidatedTrips),
+                                icon: const Icon(Icons.notifications_none_rounded, color: Colors.white, size: 20),
+                              ),
+                            ),
+                            if (state.pastUnvalidatedTrips.isNotEmpty)
+                              Positioned(
+                                right: -4,
+                                top: -6,
+                                child: CircleAvatar(
+                                  radius: 9,
+                                  backgroundColor: Colors.redAccent,
+                                  child: Text('${state.pastUnvalidatedTrips.length}', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
+                                ),
+                              ),
+                          ],
                         ),
                       ],
                     ),
@@ -423,7 +760,7 @@ class DashboardScreen extends ConsumerWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const SizedBox(height: 20),
-                  Text('Demain, ${dateFormat.format(trip.date)}', 
+                  Text('${canValidate ? 'Trajet du' : 'Trajet prévu le'} ${dateFormat.format(trip.date)}',
                     style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white)),
                   Text('Trajet aller - ${group.outboundTime}', 
                     style: const TextStyle(fontSize: 16, color: Colors.white54)),
@@ -493,11 +830,14 @@ class DashboardScreen extends ConsumerWidget {
                               foregroundColor: const Color(0xFF03150F),
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                             ),
-                            onPressed: plan.assignments.isEmpty ? null : () {
+                            onPressed: !canValidate || plan.assignments.isEmpty ? null : () {
                               ref.read(appStateProvider).confirmPlan(plan);
                               Navigator.of(context).push(MaterialPageRoute(builder: (_) => CarAssignmentScreen(plan: plan)));
                             },
-                            child: const Text('Valider le trajet', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                            child: Text(
+                              canValidate ? 'Valider le trajet' : 'Validation disponible le jour J',
+                              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                            ),
                           ),
                         ),
                       ],
@@ -536,6 +876,31 @@ class _InfoTile extends StatelessWidget {
         )
       ),
     ]
+  );
+}
+
+void _showPastTripNotifications(BuildContext context, List<Trip> trips) {
+  showDialog<void>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: const Text('Journées à valider'),
+      content: trips.isEmpty
+          ? const Text('Aucune journée passée en attente de validation.')
+          : SizedBox(
+              width: double.maxFinite,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: trips
+                    .map((trip) => ListTile(
+                          leading: const Icon(Icons.warning_amber_rounded, color: Colors.orangeAccent),
+                          title: Text(DateFormat('EEEE d MMMM', 'fr_FR').format(trip.date)),
+                          subtitle: const Text('Le covoiturage n’a pas été validé'),
+                        ))
+                    .toList(),
+              ),
+            ),
+      actions: [TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Fermer'))],
+    ),
   );
 }
 
@@ -581,6 +946,28 @@ class GroupScreen extends ConsumerWidget {
                 children: [
                   const CovoiTourLogo(size: 24),
                   const SizedBox(height: 32),
+                  Row(
+                    children: [
+                      CircleAvatar(
+                        radius: 34,
+                        backgroundColor: const Color(0xFF24D58A).withValues(alpha: 0.2),
+                        child: group.imageData == null
+                            ? const Icon(Icons.groups_outlined, size: 34, color: Color(0xFF24D58A))
+                            : ClipOval(child: _ImageSource(source: group.imageData!, size: 68)),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Text('${group.startPoint} ➔ ${group.endPoint}', style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+                      ),
+                      if (state.isCurrentUserAdmin)
+                        IconButton(
+                          onPressed: () => _editGroupImage(context, ref),
+                          icon: const Icon(Icons.camera_alt_outlined, color: Color(0xFF24D58A)),
+                          tooltip: 'Modifier l’image du groupe',
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                     decoration: BoxDecoration(
@@ -638,8 +1025,6 @@ class GroupScreen extends ConsumerWidget {
                       ],
                     ),
                   ),
-                  const SizedBox(height: 24),
-                  Text('${group.startPoint} ➔ ${group.endPoint}', style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 24),
                   const Text('Infos trajet', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 16),
@@ -725,8 +1110,18 @@ class _MyProfileMiniCard extends ConsumerWidget {
               children: [
                 Text(member.name, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                 Text(member.email, style: const TextStyle(fontSize: 12, color: Colors.white54)),
+                const SizedBox(height: 4),
+                Text(
+                  member.hasVehicle ? '${member.passengerCapacity} place${member.passengerCapacity > 1 ? 's' : ''} passager' : 'Pas de voiture déclarée',
+                  style: const TextStyle(fontSize: 12, color: Colors.white70),
+                ),
               ],
             ),
+          ),
+          IconButton(
+            onPressed: () => _editCarCapacity(context, ref, member),
+            icon: const Icon(Icons.directions_car_outlined, color: Color(0xFF24D58A)),
+            tooltip: 'Modifier ma voiture',
           ),
         ],
       ),
@@ -734,26 +1129,72 @@ class _MyProfileMiniCard extends ConsumerWidget {
   }
 
   void _editAvatar(BuildContext context, WidgetRef ref, Member member) async {
-    final controller = TextEditingController(text: member.avatarUrl);
-    final result = await showDialog<String>(
+    final image = await _pickImageData(context);
+    if (image != null && context.mounted) {
+      ref.read(appStateProvider).updateMember(member.copyWith(avatarUrl: image));
+    }
+  }
+
+  Future<void> _editCarCapacity(BuildContext context, WidgetRef ref, Member member) async {
+    final capacityController = TextEditingController(
+      text: member.hasVehicle && member.passengerCapacity > 0 ? '${member.passengerCapacity}' : '',
+    );
+    var hasVehicle = member.hasVehicle;
+    final formKey = GlobalKey<FormState>();
+    final result = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Modifier ma photo'),
-        content: TextField(
-          controller: controller,
-          decoration: const InputDecoration(hintText: 'URL de votre image'),
-          autofocus: true,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) => AlertDialog(
+          title: const Text('Ma voiture'),
+          content: Form(
+            key: formKey,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Je peux conduire'),
+                  value: hasVehicle,
+                  onChanged: (value) => setDialogState(() => hasVehicle = value),
+                ),
+                if (hasVehicle)
+                  TextFormField(
+                    controller: capacityController,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: 'Places passagers disponibles',
+                      prefixIcon: Icon(Icons.event_seat_outlined),
+                    ),
+                    validator: (value) {
+                      final capacity = int.tryParse(value?.trim() ?? '');
+                      return capacity == null || capacity < 1 ? 'Indiquez au moins 1 place' : null;
+                    },
+                  ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Annuler')),
+            FilledButton(
+              onPressed: () {
+                if (!hasVehicle || formKey.currentState!.validate()) Navigator.pop(dialogContext, true);
+              },
+              child: const Text('Enregistrer'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Annuler')),
-          FilledButton(onPressed: () => Navigator.pop(context, controller.text), child: const Text('Valider')),
-        ],
       ),
     );
 
-    if (result != null) {
-      ref.read(appStateProvider).updateMember(member.copyWith(avatarUrl: result.isEmpty ? null : result));
+    if (result == true && context.mounted) {
+      ref.read(appStateProvider).updateMember(
+            member.copyWith(
+              hasVehicle: hasVehicle,
+              passengerCapacity: hasVehicle ? int.parse(capacityController.text.trim()) : 0,
+            ),
+          );
     }
+    capacityController.dispose();
   }
 }
 
@@ -1281,6 +1722,92 @@ class _StatusItem extends StatelessWidget {
   );
 }
 
+class AdminUnvalidatedCalendarScreen extends ConsumerStatefulWidget {
+  const AdminUnvalidatedCalendarScreen({super.key});
+
+  @override
+  ConsumerState<AdminUnvalidatedCalendarScreen> createState() => _AdminUnvalidatedCalendarScreenState();
+}
+
+class _AdminUnvalidatedCalendarScreenState extends ConsumerState<AdminUnvalidatedCalendarScreen> {
+  DateTime _focusedDay = DateTime.now();
+
+  @override
+  Widget build(BuildContext context) {
+    final trips = ref.watch(appStateProvider).pastUnvalidatedTrips;
+    final dates = trips.map((trip) => trip.date).toList();
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Validations oubliées'),
+        actions: [
+          if (trips.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(right: 16),
+              child: Center(child: Text('${trips.length}', style: const TextStyle(color: Colors.orangeAccent, fontWeight: FontWeight.bold))),
+            ),
+        ],
+      ),
+      body: Column(
+        children: [
+          TableCalendar(
+            locale: 'fr_FR',
+            firstDay: DateTime.now().subtract(const Duration(days: 3650)),
+            lastDay: DateTime.now().add(const Duration(days: 365)),
+            focusedDay: _focusedDay,
+            calendarFormat: CalendarFormat.month,
+            startingDayOfWeek: StartingDayOfWeek.monday,
+            onPageChanged: (focusedDay) => _focusedDay = focusedDay,
+            onDaySelected: (selectedDay, focusedDay) {
+              _focusedDay = focusedDay;
+              final trip = trips.cast<Trip?>().firstWhere((item) => isSameDay(item!.date, selectedDay), orElse: () => null);
+              if (trip != null) _showAcknowledgeDialog(context, trip);
+            },
+            calendarBuilders: CalendarBuilders(
+              markerBuilder: (context, day, events) {
+                if (!dates.any((date) => isSameDay(date, day))) return null;
+                return const Positioned(bottom: 4, child: Icon(Icons.warning_amber_rounded, color: Colors.orangeAccent, size: 16));
+              },
+            ),
+          ),
+          const Divider(height: 1),
+          Expanded(
+            child: trips.isEmpty
+                ? const Center(child: Text('Aucune journée à traiter.', style: TextStyle(color: Colors.white54)))
+                : ListView(
+                    padding: const EdgeInsets.all(16),
+                    children: trips.map((trip) => ListTile(
+                      leading: const Icon(Icons.warning_amber_rounded, color: Colors.orangeAccent),
+                      title: Text(DateFormat('EEEE d MMMM yyyy', 'fr_FR').format(trip.date)),
+                      subtitle: const Text('Covoiturage non validé'),
+                      trailing: IconButton(icon: const Icon(Icons.check_circle_outline, color: Color(0xFF24D58A)), tooltip: 'Marquer comme normal', onPressed: () => _acknowledge(trip)),
+                    )).toList(),
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showAcknowledgeDialog(BuildContext context, Trip trip) async {
+    final acknowledge = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Validation oubliée'),
+        content: Text('Le covoiturage du ${DateFormat('EEEE d MMMM yyyy', 'fr_FR').format(trip.date)} n’a pas été validé.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Fermer')),
+          FilledButton.icon(onPressed: () => Navigator.pop(dialogContext, true), icon: const Icon(Icons.check), label: const Text('C’est normal')),
+        ],
+      ),
+    );
+    if (acknowledge == true) _acknowledge(trip);
+  }
+
+  void _acknowledge(Trip trip) {
+    ref.read(appStateProvider).acknowledgeUnvalidatedTrip(trip.id);
+  }
+}
+
 class MainAdminScreen extends StatelessWidget {
   const MainAdminScreen({super.key});
   @override
@@ -1346,9 +1873,59 @@ class MembersScreen extends ConsumerWidget {
     ]);
   }
   Future<void> _showMemberDialog(BuildContext context, WidgetRef ref, {Member? member}) async {
-    final fName = TextEditingController(text: member?.firstName); final lName = TextEditingController(text: member?.lastName); final email = TextEditingController(text: member?.email); final avatar = TextEditingController(text: member?.avatarUrl); final cap = TextEditingController(text: member?.passengerCapacity.toString() ?? '0'); bool hasV = member?.hasVehicle ?? false; final formKey = GlobalKey<FormState>();
-    final res = await showDialog<bool>(context: context, builder: (ctx) => StatefulBuilder(builder: (ctx, setS) => AlertDialog(title: Text(member == null ? 'Nouveau membre' : 'Modifier membre'), content: SingleChildScrollView(child: Form(key: formKey, child: Column(mainAxisSize: MainAxisSize.min, children: [TextFormField(controller: fName, decoration: const InputDecoration(labelText: 'Prénom *'), validator: (v) => v!.isEmpty ? 'Requis' : null), TextFormField(controller: lName, decoration: const InputDecoration(labelText: 'Nom *'), validator: (v) => v!.isEmpty ? 'Requis' : null), TextFormField(controller: email, decoration: const InputDecoration(labelText: 'Email *'), validator: (v) => !v!.contains('@') ? 'Invalide' : null), TextFormField(controller: avatar, decoration: const InputDecoration(labelText: 'URL Avatar')), SwitchListTile(title: const Text('Véhicule'), value: hasV, onChanged: (v) => setS(() => hasV = v)), if (hasV) TextFormField(controller: cap, decoration: const InputDecoration(labelText: 'Capacité *'), keyboardType: TextInputType.number, validator: (v) => int.tryParse(v ?? '') == null ? 'Requis' : null)]))), actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Annuler')), FilledButton(onPressed: () { if (formKey.currentState!.validate()) Navigator.pop(ctx, true); }, child: const Text('Enregistrer'))])));
-    if (res == true) { if (member == null) ref.read(appStateProvider).addMember(firstName: fName.text, lastName: lName.text, email: email.text, avatarUrl: avatar.text.isEmpty ? null : avatar.text, hasVehicle: hasV, passengerCapacity: int.parse(cap.text)); else ref.read(appStateProvider).updateMember(member.copyWith(firstName: fName.text, lastName: lName.text, email: email.text, avatarUrl: avatar.text.isEmpty ? null : avatar.text, hasVehicle: hasV, passengerCapacity: int.parse(cap.text))); }
+    final fName = TextEditingController(text: member?.firstName);
+    final lName = TextEditingController(text: member?.lastName);
+    final email = TextEditingController(text: member?.email);
+    final cap = TextEditingController(text: member?.passengerCapacity.toString() ?? '0');
+    var avatarData = member?.avatarUrl;
+    var hasV = member?.hasVehicle ?? false;
+    final formKey = GlobalKey<FormState>();
+    final res = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setS) => AlertDialog(
+          title: Text(member == null ? 'Nouveau membre' : 'Modifier membre'),
+          content: SingleChildScrollView(
+            child: Form(
+              key: formKey,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextFormField(controller: fName, decoration: const InputDecoration(labelText: 'Prénom *'), validator: (v) => v!.isEmpty ? 'Requis' : null),
+                  TextFormField(controller: lName, decoration: const InputDecoration(labelText: 'Nom *'), validator: (v) => v!.isEmpty ? 'Requis' : null),
+                  TextFormField(controller: email, decoration: const InputDecoration(labelText: 'Email *'), validator: (v) => !v!.contains('@') ? 'Invalide' : null),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: avatarData == null ? const CircleAvatar(child: Icon(Icons.person)) : CircleAvatar(child: ClipOval(child: _ImageSource(source: avatarData!, size: 40))),
+                    title: const Text('Photo du membre'),
+                    trailing: IconButton(
+                      icon: const Icon(Icons.add_a_photo_outlined),
+                      onPressed: () async {
+                        final image = await _pickImageData(ctx);
+                        if (image != null) setS(() => avatarData = image);
+                      },
+                    ),
+                  ),
+                  SwitchListTile(title: const Text('Véhicule'), value: hasV, onChanged: (v) => setS(() => hasV = v)),
+                  if (hasV) TextFormField(controller: cap, decoration: const InputDecoration(labelText: 'Capacité *'), keyboardType: TextInputType.number, validator: (v) => int.tryParse(v ?? '') == null ? 'Requis' : null),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Annuler')),
+            FilledButton(onPressed: () { if (formKey.currentState!.validate()) Navigator.pop(ctx, true); }, child: const Text('Enregistrer')),
+          ],
+        ),
+      ),
+    );
+    if (res == true) {
+      if (member == null) {
+        ref.read(appStateProvider).addMember(firstName: fName.text, lastName: lName.text, email: email.text, avatarUrl: avatarData, hasVehicle: hasV, passengerCapacity: int.parse(cap.text));
+      } else {
+        ref.read(appStateProvider).updateMember(member.copyWith(firstName: fName.text, lastName: lName.text, email: email.text, avatarUrl: avatarData, hasVehicle: hasV, passengerCapacity: int.parse(cap.text)));
+      }
+    }
   }
 }
 
@@ -1360,12 +1937,57 @@ class AdminScreen extends ConsumerStatefulWidget {
 
 class _AdminScreenState extends ConsumerState<AdminScreen> {
   late TextEditingController _name, _desc, _start, _end, _out, _ret;
+  String? _groupImageData;
+
   @override
-  void initState() { super.initState(); final g = ref.read(appStateProvider).group; _name = TextEditingController(text: g.name); _desc = TextEditingController(text: g.description); _start = TextEditingController(text: g.startPoint); _end = TextEditingController(text: g.endPoint); _out = TextEditingController(text: g.outboundTime); _ret = TextEditingController(text: g.returnTime); }
+  void initState() {
+    super.initState();
+    final g = ref.read(appStateProvider).group;
+    _name = TextEditingController(text: g.name);
+    _desc = TextEditingController(text: g.description);
+    _start = TextEditingController(text: g.startPoint);
+    _end = TextEditingController(text: g.endPoint);
+    _out = TextEditingController(text: g.outboundTime);
+    _ret = TextEditingController(text: g.returnTime);
+    _groupImageData = g.imageData;
+  }
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _desc.dispose();
+    _start.dispose();
+    _end.dispose();
+    _out.dispose();
+    _ret.dispose();
+    super.dispose();
+  }
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(appStateProvider);
     return ListView(padding: const EdgeInsets.fromLTRB(24, 20, 24, 100), children: [
+      if (state.pastUnvalidatedTrips.isNotEmpty)
+        Container(
+          margin: const EdgeInsets.only(bottom: 24),
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.orangeAccent.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.orangeAccent.withValues(alpha: 0.45)),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.warning_amber_rounded, color: Colors.orangeAccent),
+              const SizedBox(width: 12),
+              Expanded(child: Text('${state.pastUnvalidatedTrips.length} journée${state.pastUnvalidatedTrips.length > 1 ? 's' : ''} passée${state.pastUnvalidatedTrips.length > 1 ? 's' : ''} non validée${state.pastUnvalidatedTrips.length > 1 ? 's' : ''}.')),
+              IconButton(
+                icon: const Icon(Icons.calendar_month, color: Colors.orangeAccent),
+                tooltip: 'Ouvrir le calendrier des alertes',
+                onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AdminUnvalidatedCalendarScreen())),
+              ),
+            ],
+          ),
+        ),
       Text('Infos du groupe', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)), const SizedBox(height: 16),
       Text(
         'Administrateur : ${state.group.members.where((member) => member.id == state.group.adminId).firstOrNull?.name ?? 'Non défini'}',
@@ -1383,8 +2005,25 @@ class _AdminScreenState extends ConsumerState<AdminScreen> {
         },
       ),
       const SizedBox(height: 32),
-      TextField(controller: _name, decoration: const InputDecoration(labelText: 'Nom')), TextField(controller: _desc, decoration: const InputDecoration(labelText: 'Description')),
-      TextField(controller: _start, decoration: const InputDecoration(labelText: 'Départ')), TextField(controller: _end, decoration: const InputDecoration(labelText: 'Arrivée')),
+      ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: const BorderSide(color: Colors.white10)),
+        leading: _groupImageData == null
+            ? const CircleAvatar(child: Icon(Icons.groups_outlined))
+            : CircleAvatar(child: ClipOval(child: _ImageSource(source: _groupImageData!, size: 40))),
+        title: const Text('Photo du groupe'),
+        subtitle: Text(_groupImageData == null ? 'Aucune photo sélectionnée' : 'Photo sélectionnée'),
+        trailing: const Icon(Icons.add_a_photo_outlined),
+        onTap: () async {
+          final image = await _pickImageData(context);
+          if (image != null) setState(() => _groupImageData = image);
+        },
+      ),
+      const SizedBox(height: 12),
+      TextField(controller: _name, decoration: const InputDecoration(labelText: 'Nom du groupe')),
+      TextField(controller: _desc, decoration: const InputDecoration(labelText: 'Description')),
+      TextField(controller: _start, decoration: const InputDecoration(labelText: 'Point de départ')),
+      TextField(controller: _end, decoration: const InputDecoration(labelText: 'Point de retour')),
       Row(children: [Expanded(child: TextField(controller: _out, decoration: const InputDecoration(labelText: 'Aller'))), const SizedBox(width: 16), Expanded(child: TextField(controller: _ret, decoration: const InputDecoration(labelText: 'Retour')))]),
       const SizedBox(height: 32),
       Text('Jours sans covoiturage', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)), const SizedBox(height: 8),
@@ -1398,7 +2037,7 @@ class _AdminScreenState extends ConsumerState<AdminScreen> {
         _DayChip(label: 'D', day: 7, isOff: state.group.offDays.contains(7), onToggle: (off) => _toggleDay(7, off)),
       ]),
       const SizedBox(height: 32),
-      FilledButton.icon(onPressed: () { state.updateGroup(name: _name.text, description: _desc.text, startPoint: _start.text, endPoint: _end.text, outboundTime: _out.text, returnTime: _ret.text, offDays: state.group.offDays); ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Config enregistrée'))); }, icon: const Icon(Icons.save), label: const Text('Enregistrer tout')),
+      FilledButton.icon(onPressed: () { state.updateGroup(name: _name.text, description: _desc.text, startPoint: _start.text, endPoint: _end.text, outboundTime: _out.text, returnTime: _ret.text, offDays: state.group.offDays, imageData: _groupImageData); ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Configuration du groupe enregistrée'))); }, icon: const Icon(Icons.save), label: const Text('Enregistrer tout')),
     ]);
   }
   Future<void> _showAdminTransferDialog(BuildContext context, WidgetRef ref, List<Member> candidates) async {
