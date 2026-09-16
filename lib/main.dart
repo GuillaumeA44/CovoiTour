@@ -66,6 +66,14 @@ class CovoiTourApp extends StatelessWidget {
           elevation: 0,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         ),
+        dialogTheme: DialogThemeData(
+          backgroundColor: const Color(0xFF0C192A),
+          surfaceTintColor: const Color(0xFF24D58A),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(28),
+            side: const BorderSide(color: Colors.white10, width: 1),
+          ),
+        ),
       ),
       home: const HomeShell(),
     );
@@ -98,6 +106,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     final pages = [
       const DashboardScreen(),
       const GroupScreen(),
+      const HistoryScreen(),
       const ScoresScreen(),
       const PresenceScreen(),
       if (isAdmin) const MainAdminScreen(),
@@ -117,6 +126,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
           destinations: [
             const NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: 'Accueil'),
             const NavigationDestination(icon: Icon(Icons.groups_outlined), selectedIcon: Icon(Icons.groups), label: 'Groupe'),
+            const NavigationDestination(icon: Icon(Icons.history_outlined), selectedIcon: Icon(Icons.history), label: 'Historique'),
             const NavigationDestination(icon: Icon(Icons.balance_outlined), selectedIcon: Icon(Icons.balance), label: 'Équité'),
             const NavigationDestination(icon: Icon(Icons.calendar_month_outlined), selectedIcon: Icon(Icons.calendar_month), label: 'Calendrier'),
             if (isAdmin) const NavigationDestination(icon: Icon(Icons.admin_panel_settings_outlined), selectedIcon: Icon(Icons.admin_panel_settings), label: 'Admin'),
@@ -181,7 +191,7 @@ class _CreateGroupScreenState extends ConsumerState<CreateGroupScreen> {
           child: ListView(
             padding: const EdgeInsets.fromLTRB(24, 40, 24, 40),
             children: [
-              const CovoiTourLogo(size: 28),
+              const Center(child: CovoiTourLogo(size: 28)),
               const SizedBox(height: 40),
               const Text('Créer votre groupe', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
@@ -411,14 +421,28 @@ class _CreateGroupScreenState extends ConsumerState<CreateGroupScreen> {
     }
 
     try {
-      final places = await locationFromAddress(value.trim());
+      final locations = await locationFromAddress(value.trim());
       if (!mounted || token != _addressSearchToken) return;
-      final suggestions = places.take(4).map((place) {
-        return [place.street, place.postalCode, place.locality, place.country]
-            .whereType<String>()
-            .where((part) => part.isNotEmpty)
-            .join(', ');
-      }).where((address) => address.isNotEmpty).toSet().toList();
+
+      final suggestionList = await Future.wait(locations.take(3).map((loc) async {
+        try {
+          final pms = await placemarkFromCoordinates(loc.latitude, loc.longitude);
+          if (pms.isNotEmpty) {
+            final p = pms.first;
+            return [p.street, p.postalCode, p.locality, p.country]
+                .where((part) => part != null && part.isNotEmpty)
+                .join(', ');
+          }
+        } catch (_) {}
+        return null;
+      }));
+
+      final suggestions = suggestionList
+          .whereType<String>()
+          .where((s) => s.isNotEmpty)
+          .toSet()
+          .toList();
+
       setState(() {
         if (isStart) {
           _startSuggestions = suggestions;
@@ -454,13 +478,16 @@ class _CreateGroupScreenState extends ConsumerState<CreateGroupScreen> {
       }
     });
     try {
-      final places = await locationFromAddress(controller.text.trim());
+      final locations = await locationFromAddress(controller.text.trim());
       if (!mounted) return;
-      if (places.isEmpty) throw const FormatException();
-      final place = places.first;
+      if (locations.isEmpty) throw const FormatException();
+      
+      final placemarks = await placemarkFromCoordinates(locations.first.latitude, locations.first.longitude);
+      if (placemarks.isEmpty) throw const FormatException();
+      final place = placemarks.first;
+
       final formatted = [place.street, place.postalCode, place.locality, place.country]
-          .whereType<String>()
-          .where((part) => part.isNotEmpty)
+          .where((part) => part != null && part.isNotEmpty)
           .join(', ');
       setState(() {
         controller.text = formatted.isEmpty ? controller.text.trim() : formatted;
@@ -664,15 +691,8 @@ class DashboardScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final state = ref.watch(appStateProvider);
     final group = state.group;
-    final trips = group.trips.where((t) => t.confirmedDriverIds.isEmpty).toList();
-    
-    if (trips.isEmpty) {
-      return Scaffold(appBar: AppBar(title: const Text('CovoiTour')), body: const Center(child: Text('Aucun trajet prévu.')));
-    }
-
-    final trip = trips.first;
-    final plan = state.recommendPlan();
-    final canValidate = state.canValidateTrip(trip.date);
+    // Un trajet n'est affiché ici que s'il n'est pas encore validé ET s'il y a au moins 2 participants
+    final trips = group.trips.where((t) => t.confirmedDriverIds.isEmpty && t.presentMemberIds.length >= 2).toList();
     final dateFormat = DateFormat('EEEE d MMM', 'fr_FR');
     
     return Scaffold(
@@ -732,97 +752,270 @@ class DashboardScreen extends ConsumerWidget {
             Padding(
               padding: const EdgeInsets.fromLTRB(24, 0, 24, 28),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const SizedBox(height: 20),
-                  Text('${canValidate ? 'Trajet du' : 'Trajet prévu le'} ${dateFormat.format(trip.date)}',
-                    style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white)),
-                  Text('Trajet aller - ${group.outboundTime}', 
-                    style: const TextStyle(fontSize: 16, color: Colors.white54)),
+                  trips.isEmpty 
+                    ? _buildEmptyState() 
+                    : _buildTripDetails(context, ref, state, trips.first, dateFormat),
                   const SizedBox(height: 32),
-                  Row(children: [
-                    Expanded(
-                      child: _InfoTile(
-                        icon: Icons.groups_rounded, 
-                        value: '${trip.presentMemberIds.length}', 
-                        label: 'participants', 
-                        color: const Color(0xFF24D58A)
-                      )
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: _InfoTile(
-                        icon: Icons.directions_car_rounded, 
-                        value: '${plan.assignments.length}', 
-                        label: 'voitures', 
-                        color: const Color(0xFF32B5FF)
-                      )
-                    ),
-                  ]),
-                  const SizedBox(height: 32),
-                  Container(
-                    decoration: BoxDecoration(
-                      gradient: const LinearGradient(colors: [Color(0xFF0D8F68), Color(0xFF075348)], begin: Alignment.topLeft, end: Alignment.bottomRight),
-                      borderRadius: BorderRadius.circular(28),
-                    ),
-                    padding: const EdgeInsets.all(24),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('Conducteurs proposés', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
-                        const Text('Basés sur l’équité du groupe', style: TextStyle(color: Colors.white70)),
-                        const SizedBox(height: 24),
-                        if (plan.assignments.isNotEmpty)
-                          ...plan.assignments.map((assignment) {
-                            final driver = group.members.firstWhere((m) => m.id == assignment.driverId);
-                            final score = state.scoresFor(assignment.passengerIds.length + 1)[driver.id] ?? 0;
-                            return _DriverCard(member: driver, score: score);
-                          })
-                        else
-                          const Text('Aucun conducteur disponible', style: TextStyle(color: Colors.white54)),
-                        const SizedBox(height: 24),
-                        SizedBox(
-                          width: double.infinity,
-                          height: 56,
-                          child: OutlinedButton.icon(
-                            style: OutlinedButton.styleFrom(
-                              side: const BorderSide(color: Color(0xFF24D58A)),
-                              foregroundColor: const Color(0xFF24D58A),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                            ),
-                            onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const TripTrackingScreen())),
-                            icon: const Icon(Icons.location_on_outlined),
-                            label: const Text('Suivre le trajet (J-15 min)', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        SizedBox(
-                          width: double.infinity,
-                          height: 56,
-                          child: FilledButton(
-                            style: FilledButton.styleFrom(
-                              backgroundColor: const Color(0xFF24D58A),
-                              foregroundColor: const Color(0xFF03150F),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                            ),
-                            onPressed: !canValidate || plan.assignments.isEmpty ? null : () {
-                              ref.read(appStateProvider).confirmPlan(plan);
-                              Navigator.of(context).push(MaterialPageRoute(builder: (_) => CarAssignmentScreen(plan: plan)));
-                            },
-                            child: Text(
-                              canValidate ? 'Valider le trajet' : 'Validation disponible le jour J',
-                              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
+                  TextButton.icon(
+                    onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PlannedTripsScreen())),
+                    icon: const Icon(Icons.list_alt_rounded, color: Color(0xFF24D58A)),
+                    label: const Text('Voir tout le planning des présences', style: TextStyle(color: Color(0xFF24D58A), fontWeight: FontWeight.bold)),
                   ),
                 ],
               ),
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Column(
+      children: [
+        const SizedBox(height: 60),
+        Container(
+          padding: const EdgeInsets.all(32),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.05),
+            borderRadius: BorderRadius.circular(28),
+            border: Border.all(color: Colors.white10),
+          ),
+          child: Column(
+            children: [
+              Icon(Icons.event_busy_outlined, size: 48, color: Colors.white.withValues(alpha: 0.2)),
+              const SizedBox(height: 16),
+              const Text(
+                'Aucun trajet prévu',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Tout est à jour pour le moment ! Vérifiez l’onglet Calendrier pour vos prochaines disponibilités.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white54),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTripDetails(BuildContext context, WidgetRef ref, AppState state, Trip trip, DateFormat dateFormat) {
+    final group = state.group;
+    final plan = state.recommendPlan();
+    final canValidate = state.canValidateTrip(trip.date);
+    
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 20),
+        Text('${canValidate ? 'Trajet du' : 'Trajet prévu le'} ${dateFormat.format(trip.date)}',
+          style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white)),
+        Text('Trajet aller - ${group.outboundTime}', 
+          style: const TextStyle(fontSize: 16, color: Colors.white54)),
+        const SizedBox(height: 32),
+        Row(children: [
+          Expanded(
+            child: _InfoTile(
+              icon: Icons.groups_rounded, 
+              value: '${trip.presentMemberIds.length}', 
+              label: 'participants', 
+              color: const Color(0xFF24D58A)
+            )
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: _InfoTile(
+              icon: Icons.directions_car_rounded, 
+              value: '${plan.assignments.length}', 
+              label: 'voitures', 
+              color: const Color(0xFF32B5FF)
+            )
+          ),
+        ]),
+        const SizedBox(height: 32),
+        Container(
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(colors: [Color(0xFF0D8F68), Color(0xFF075348)], begin: Alignment.topLeft, end: Alignment.bottomRight),
+            borderRadius: BorderRadius.circular(28),
+          ),
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Conducteurs proposés', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
+              const Text('Basés sur l’équité du groupe', style: TextStyle(color: Colors.white70)),
+              const SizedBox(height: 24),
+              if (plan.assignments.isNotEmpty)
+                ...plan.assignments.map((assignment) {
+                  final driver = group.members.firstWhere((m) => m.id == assignment.driverId);
+                  final score = state.scoresFor(assignment.passengerIds.length + 1)[driver.id] ?? 0;
+                  return _DriverCard(member: driver, score: score);
+                })
+              else
+                const Text('Aucun conducteur disponible', style: TextStyle(color: Colors.white54)),
+              const SizedBox(height: 24),
+              Builder(
+                builder: (context) {
+                  // Vérification de l'horaire pour le suivi J-15
+                  bool canTrack = false;
+                  final now = DateTime.now();
+                  
+                  // Seulement si c'est aujourd'hui
+                  if (isSameDay(trip.date, now)) {
+                    try {
+                      final parts = group.outboundTime.split(':');
+                      if (parts.length == 2) {
+                        final hour = int.parse(parts[0]);
+                        final minute = int.parse(parts[1]);
+                        
+                        final tripTime = DateTime(now.year, now.month, now.day, hour, minute);
+                        // Disponible 15 minutes avant l'heure de départ
+                        final trackingStartTime = tripTime.subtract(const Duration(minutes: 15));
+                        
+                        if (now.isAfter(trackingStartTime) && now.isBefore(tripTime.add(const Duration(hours: 2)))) {
+                          canTrack = true;
+                        }
+                      }
+                    } catch (_) {}
+                  }
+
+                  return SizedBox(
+                    width: double.infinity,
+                    height: 56,
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        side: BorderSide(color: canTrack ? const Color(0xFF24D58A) : Colors.white24),
+                        foregroundColor: canTrack ? const Color(0xFF24D58A) : Colors.white30,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      ),
+                      onPressed: canTrack 
+                          ? () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const TripTrackingScreen()))
+                          : null,
+                      icon: const Icon(Icons.location_on_outlined),
+                      label: Text(
+                        canTrack ? 'Suivre le trajet (Disponible)' : 'Suivre le trajet (J-15 min)', 
+                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)
+                      ),
+                    ),
+                  );
+                }
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                height: 56,
+                child: FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF24D58A),
+                    foregroundColor: const Color(0xFF03150F),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  ),
+                  onPressed: !canValidate || plan.assignments.isEmpty ? null : () {
+                    ref.read(appStateProvider).confirmPlan(plan);
+                    Navigator.of(context).push(MaterialPageRoute(builder: (_) => CarAssignmentScreen(plan: plan)));
+                  },
+                  child: Text(
+                    canValidate ? 'Valider le trajet' : 'Validation disponible le jour J',
+                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class PlannedTripsScreen extends ConsumerWidget {
+  const PlannedTripsScreen({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final state = ref.watch(appStateProvider);
+    final group = state.group;
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    
+    // Tous les trajets à venir avec au moins 1 personne
+    final allTrips = group.trips
+        .where((t) => !t.date.isBefore(today) && t.presentMemberIds.isNotEmpty)
+        .toList()
+      ..sort((a, b) => a.date.compareTo(b.date));
+
+    return Scaffold(
+      extendBodyBehindAppBar: true,
+      appBar: AppBar(
+        title: const Text('Planning des trajets', style: TextStyle(fontWeight: FontWeight.bold)),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        centerTitle: true,
+      ),
+      body: FullPageBackground(
+        imageUrl: 'https://images.unsplash.com/photo-1541899481282-d53bffe3c35d?q=80&w=1000',
+        child: allTrips.isEmpty
+            ? const Center(child: Text('Aucun trajet avec des présences prévues.', style: TextStyle(color: Colors.white54)))
+            : ListView.builder(
+                padding: const EdgeInsets.fromLTRB(24, 100, 24, 40),
+                itemCount: allTrips.length,
+                itemBuilder: (context, index) {
+                  final trip = allTrips[index];
+                  final isCarpool = trip.presentMemberIds.length >= 2;
+                  
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 16),
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0C192A),
+                      borderRadius: BorderRadius.circular(24),
+                      border: Border.all(color: isCarpool ? const Color(0xFF24D58A).withValues(alpha: 0.3) : Colors.white10),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              DateFormat('EEEE d MMMM', 'fr_FR').format(trip.date),
+                              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                            ),
+                            if (isCarpool)
+                              const _StatusBadge(status: AttendanceStatus.present)
+                            else
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(8)),
+                                child: const Text('SOLO', style: TextStyle(color: Colors.white54, fontSize: 10, fontWeight: FontWeight.bold)),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: trip.presentMemberIds.map((id) {
+                            final m = group.members.firstWhere((m) => m.id == id, orElse: () => Member(id: id, firstName: '?', lastName: '', email: ''));
+                            return Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                MemberAvatar(member: m, radius: 12),
+                                const SizedBox(width: 6),
+                                Text(m.firstName, style: const TextStyle(fontSize: 14, color: Colors.white70)),
+                              ],
+                            );
+                          }).toList(),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
       ),
     );
   }
@@ -919,28 +1112,53 @@ class GroupScreen extends ConsumerWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const CovoiTourLogo(size: 24),
+                  const Center(child: CovoiTourLogo(size: 24)),
                   const SizedBox(height: 32),
-                  Row(
-                    children: [
-                      CircleAvatar(
-                        radius: 34,
-                        backgroundColor: const Color(0xFF24D58A).withValues(alpha: 0.2),
-                        child: group.imageData == null
-                            ? const Icon(Icons.groups_outlined, size: 34, color: Color(0xFF24D58A))
-                            : ClipOval(child: _ImageSource(source: group.imageData!, size: 68)),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Text('${group.startPoint} ➔ ${group.endPoint}', style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-                      ),
-                      if (state.isCurrentUserAdmin)
-                        IconButton(
-                          onPressed: () => _editGroupImage(context, ref),
-                          icon: const Icon(Icons.camera_alt_outlined, color: Color(0xFF24D58A)),
-                          tooltip: 'Modifier l’image du groupe',
+                  Center(
+                    child: GestureDetector(
+                      onTap: state.isCurrentUserAdmin ? () => _editGroupImage(context, ref) : null,
+                      child: Tooltip(
+                        message: state.isCurrentUserAdmin ? 'Modifier l’image du groupe' : '',
+                        child: CircleAvatar(
+                          radius: 45,
+                          backgroundColor: const Color(0xFF24D58A).withValues(alpha: 0.2),
+                          child: group.imageData == null
+                              ? const Icon(Icons.groups_outlined, size: 45, color: Color(0xFF24D58A))
+                              : ClipOval(child: _ImageSource(source: group.imageData!, size: 90)),
                         ),
-                    ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0C192A),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Column(
+                      children: [
+                        Text(
+                          group.startPoint,
+                          textAlign: TextAlign.center,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.white),
+                        ),
+                        const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 6),
+                          child: Icon(Icons.arrow_downward, color: Color(0xFF24D58A), size: 20),
+                        ),
+                        Text(
+                          group.endPoint,
+                          textAlign: TextAlign.center,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.white),
+                        ),
+                      ],
+                    ),
                   ),
                   const SizedBox(height: 24),
                   Container(
@@ -1241,7 +1459,7 @@ class _ScoresScreenState extends ConsumerState<ScoresScreen> {
           padding: const EdgeInsets.symmetric(horizontal: 24),
           children: [
             const SizedBox(height: 60),
-            const CovoiTourLogo(size: 24),
+            const Center(child: CovoiTourLogo(size: 24)),
             const SizedBox(height: 20),
             const Text('Équité', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white)),
             const SizedBox(height: 24),
@@ -1316,7 +1534,7 @@ class PresenceScreen extends ConsumerWidget {
           padding: const EdgeInsets.symmetric(horizontal: 24),
           children: [
             const SizedBox(height: 60),
-            const CovoiTourLogo(size: 24),
+            const Center(child: CovoiTourLogo(size: 24)),
             const SizedBox(height: 20),
             const Text('Ma présence', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white)),
             const SizedBox(height: 32),
@@ -1388,6 +1606,7 @@ class _SharedCalendarScreenState extends ConsumerState<SharedCalendarScreen> {
             Text(_getTitle(), style: const TextStyle(fontWeight: FontWeight.bold)),
           ],
         ),
+        centerTitle: true,
         backgroundColor: Colors.transparent,
         elevation: 0,
       ),
@@ -1507,6 +1726,21 @@ class _SharedCalendarScreenState extends ConsumerState<SharedCalendarScreen> {
                 });
               },
               calendarBuilders: CalendarBuilders(
+                todayBuilder: (context, day, focusedDay) {
+                  return Container(
+                    margin: const EdgeInsets.all(4.0),
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF24D58A).withValues(alpha: 0.2),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: const Color(0xFF24D58A).withValues(alpha: 0.5)),
+                    ),
+                    child: Text(
+                      '${day.day}',
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                    ),
+                  );
+                },
                 markerBuilder: (context, day, events) {
                   final trip = state.group.trips.firstWhere(
                     (t) => isSameDay(t.date, day),
@@ -1738,6 +1972,21 @@ class _AdminUnvalidatedCalendarScreenState extends ConsumerState<AdminUnvalidate
               if (trip != null) _showAcknowledgeDialog(context, trip);
             },
             calendarBuilders: CalendarBuilders(
+              todayBuilder: (context, day, focusedDay) {
+                return Container(
+                  margin: const EdgeInsets.all(4.0),
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF24D58A).withValues(alpha: 0.2),
+                    shape: BoxShape.circle,
+                    border: Border.all(color: const Color(0xFF24D58A).withValues(alpha: 0.5)),
+                  ),
+                  child: Text(
+                    '${day.day}',
+                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                  ),
+                );
+              },
               markerBuilder: (context, day, events) {
                 if (!dates.any((date) => isSameDay(date, day))) return null;
                 return const Positioned(bottom: 4, child: Icon(Icons.warning_amber_rounded, color: Colors.orangeAccent, size: 16));
@@ -1787,7 +2036,7 @@ class MainAdminScreen extends StatelessWidget {
   const MainAdminScreen({super.key});
   @override
   Widget build(BuildContext context) => DefaultTabController(
-    length: 3, 
+    length: 2, 
     child: Scaffold(
       extendBodyBehindAppBar: true, 
       appBar: AppBar(backgroundColor: Colors.transparent, elevation: 0), 
@@ -1797,10 +2046,7 @@ class MainAdminScreen extends StatelessWidget {
         child: Column(
           children: [
             const SizedBox(height: 60),
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 24),
-              child: Align(alignment: Alignment.centerLeft, child: CovoiTourLogo(size: 24)),
-            ),
+            const Center(child: CovoiTourLogo(size: 24)),
             const SizedBox(height: 20),
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 24),
@@ -1814,7 +2060,6 @@ class MainAdminScreen extends StatelessWidget {
               tabs: [
                 Tab(text: 'Membres', icon: Icon(Icons.people_outline)),
                 Tab(text: 'Groupe', icon: Icon(Icons.settings_outlined)),
-                Tab(text: 'Historique', icon: Icon(Icons.history))
               ], 
               indicatorColor: Color(0xFF24D58A), 
               labelColor: Color(0xFF24D58A), 
@@ -1825,7 +2070,6 @@ class MainAdminScreen extends StatelessWidget {
                 children: [
                   const MembersScreen(),
                   const AdminScreen(),
-                  const HistoryScreen()
                 ]
               )
             ),
@@ -1844,10 +2088,60 @@ class MembersScreen extends ConsumerWidget {
     return ListView(padding: const EdgeInsets.fromLTRB(24, 20, 24, 100), children: [
       Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text('Liste des membres', style: Theme.of(context).textTheme.titleLarge), FilledButton.icon(onPressed: () => _showMemberDialog(context, ref), icon: const Icon(Icons.person_add), label: const Text('Ajouter'))]),
       const SizedBox(height: 20),
-      ...state.activeMembers.map((member) => Card(margin: const EdgeInsets.only(bottom: 12), child: ListTile(leading: MemberAvatar(member: member), title: Text(member.name), subtitle: Text(member.hasVehicle ? '${member.email}\n${member.passengerCapacity} places' : '${member.email}\nPas de véhicule'), isThreeLine: true, trailing: PopupMenuButton<String>(onSelected: (v) { if (v == 'edit') _showMemberDialog(context, ref, member: member); else if (v == 'archive') ref.read(appStateProvider).archiveMember(member.id); }, itemBuilder: (_) => const [PopupMenuItem(value: 'edit', child: Text('Modifier')), PopupMenuItem(value: 'archive', child: Text('Archiver'))])))),
+      ...state.activeMembers.map((member) {
+        final isAd = member.id == state.group.adminId;
+        return Card(
+          margin: const EdgeInsets.only(bottom: 12),
+          child: ListTile(
+            leading: MemberAvatar(member: member),
+            title: Text(member.name),
+            subtitle: Text(member.hasVehicle ? '${member.email}\n${member.passengerCapacity} places' : '${member.email}\nPas de véhicule'),
+            isThreeLine: true,
+            trailing: PopupMenuButton<String>(
+              onSelected: (v) {
+                if (v == 'edit') {
+                  _showMemberDialog(context, ref, member: member);
+                } else if (v == 'archive') {
+                  _confirmArchive(context, ref, member);
+                }
+              },
+              itemBuilder: (_) => [
+                const PopupMenuItem(value: 'edit', child: Text('Modifier')),
+                if (!isAd)
+                  const PopupMenuItem(
+                    value: 'archive',
+                    child: Text('Retirer du groupe', style: TextStyle(color: Colors.redAccent)),
+                  ),
+              ],
+            ),
+          ),
+        );
+      }),
     ]);
   }
+
+  Future<void> _confirmArchive(BuildContext context, WidgetRef ref, Member member) async {
+    final res = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Retirer un membre'),
+        content: Text('Voulez-vous vraiment retirer ${member.name} du groupe ? Ses données de présence seront archivées.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Annuler')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.redAccent, foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Retirer'),
+          ),
+        ],
+      ),
+    );
+    if (res == true) {
+      ref.read(appStateProvider).archiveMember(member.id);
+    }
+  }
   Future<void> _showMemberDialog(BuildContext context, WidgetRef ref, {Member? member}) async {
+    final state = ref.read(appStateProvider);
     final fName = TextEditingController(text: member?.firstName);
     final lName = TextEditingController(text: member?.lastName);
     final email = TextEditingController(text: member?.email);
@@ -1868,7 +2162,24 @@ class MembersScreen extends ConsumerWidget {
                 children: [
                   TextFormField(controller: fName, decoration: const InputDecoration(labelText: 'Prénom *'), validator: (v) => v!.isEmpty ? 'Requis' : null),
                   TextFormField(controller: lName, decoration: const InputDecoration(labelText: 'Nom *'), validator: (v) => v!.isEmpty ? 'Requis' : null),
-                  TextFormField(controller: email, decoration: const InputDecoration(labelText: 'Email *'), validator: (v) => !v!.contains('@') ? 'Invalide' : null),
+                  TextFormField(
+                    controller: email,
+                    decoration: const InputDecoration(labelText: 'Email *'),
+                    validator: (v) {
+                      if (v == null || v.isEmpty) return 'Requis';
+                      if (!v.contains('@')) return 'Invalide';
+                      
+                      final emailTrimmed = v.trim().toLowerCase();
+                      final emailAlreadyExists = state.activeMembers.any((m) => 
+                        m.id != member?.id && m.email.trim().toLowerCase() == emailTrimmed
+                      );
+                      
+                      if (emailAlreadyExists) {
+                        return 'Cette adresse email est déjà utilisée dans le groupe';
+                      }
+                      return null;
+                    },
+                  ),
                   ListTile(
                     contentPadding: EdgeInsets.zero,
                     leading: avatarData == null ? const CircleAvatar(child: Icon(Icons.person)) : CircleAvatar(child: ClipOval(child: _ImageSource(source: avatarData!, size: 40))),
@@ -2106,7 +2417,17 @@ class CarAssignmentScreen extends StatelessWidget {
   final TripPlan plan;
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(leading: const Padding(padding: EdgeInsets.only(left: 16.0), child: Center(child: CovoiTourLogo(size: 20))), leadingWidth: 120, title: const Text('Répartition des voitures', style: TextStyle(fontWeight: FontWeight.bold)), centerTitle: true),
+    appBar: AppBar(
+      title: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const CovoiTourLogo(size: 20),
+          const SizedBox(width: 12),
+          const Text('Répartition des voitures', style: TextStyle(fontWeight: FontWeight.bold)),
+        ],
+      ),
+      centerTitle: true,
+    ),
     body: ListView(padding: const EdgeInsets.all(24), children: [
       Container(padding: const EdgeInsets.all(16), decoration: BoxDecoration(color: const Color(0xFF24D58A).withOpacity(0.1), borderRadius: BorderRadius.circular(16)), child: Row(children: [const Icon(Icons.check_circle, color: Color(0xFF24D58A)), const SizedBox(width: 12), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: const [Text('Trajet validé !', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)), Text('Tout le monde a été notifié.', style: TextStyle(color: Colors.white54, fontSize: 12))]))])),
       const SizedBox(height: 32),
@@ -2139,18 +2460,219 @@ class _MemberTile extends StatelessWidget {
   Widget build(BuildContext context) => Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: Row(children: [MemberAvatar(member: member, radius: 20), const SizedBox(width: 16), Expanded(child: Text(member.name, style: const TextStyle(fontWeight: FontWeight.w600))), if (isDriver) Container(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4), decoration: BoxDecoration(color: const Color(0xFF24D58A).withValues(alpha: 0.1), borderRadius: BorderRadius.circular(20)), child: const Text('Conducteur', style: TextStyle(color: Color(0xFF24D58A), fontSize: 12, fontWeight: FontWeight.bold)))]));
 }
 
-class HistoryScreen extends ConsumerWidget {
+class HistoryScreen extends ConsumerStatefulWidget {
   const HistoryScreen({super.key});
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<HistoryScreen> createState() => _HistoryScreenState();
+}
+
+class _HistoryScreenState extends ConsumerState<HistoryScreen> {
+  DateTimeRange? _dateRange;
+  String? _selectedMemberId;
+  int? _minCapacity;
+  bool _showFilters = false;
+
+  @override
+  Widget build(BuildContext context) {
     final state = ref.watch(appStateProvider);
-    final completedTrips = state.group.trips.where((t) => t.confirmedDriverIds.isNotEmpty).toList().reversed.toList();
-    return ListView(padding: const EdgeInsets.fromLTRB(24, 20, 24, 100), children: [
-      Text('Anciens trajets', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)), const SizedBox(height: 16),
-      if (completedTrips.isEmpty) const Center(child: Text('Aucun trajet validé.')) else ...completedTrips.map((trip) {
-        final driverNames = trip.confirmedDriverIds.map((id) => state.group.members.firstWhere((m) => m.id == id, orElse: () => Member(id: id, firstName: 'Inconnu', lastName: '', email: '')).name).join(', ');
-        return Card(margin: const EdgeInsets.only(bottom: 12), child: ListTile(leading: const Icon(Icons.event_available, color: Color(0xFF24D58A)), title: Text(DateFormat('dd/MM/yyyy').format(trip.date)), subtitle: Text('Conducteur(s) : $driverNames\n${trip.presentMemberIds.length} passagers'), isThreeLine: true));
-      }),
-    ]);
+    final group = state.group;
+
+    var filteredTrips = group.trips.where((t) => t.confirmedDriverIds.isNotEmpty).toList();
+
+    // Filtres
+    if (_dateRange != null) {
+      filteredTrips = filteredTrips.where((t) {
+        final date = DateTime(t.date.year, t.date.month, t.date.day);
+        return !date.isBefore(_dateRange!.start) && !date.isAfter(_dateRange!.end);
+      }).toList();
+    }
+    if (_selectedMemberId != null) {
+      filteredTrips = filteredTrips.where((t) => t.presentMemberIds.contains(_selectedMemberId)).toList();
+    }
+    if (_minCapacity != null) {
+      filteredTrips = filteredTrips.where((t) {
+        return t.confirmedDriverIds.any((dId) {
+          final d = group.members.firstWhere((m) => m.id == dId, orElse: () => Member(id: dId, firstName: '', lastName: '', email: ''));
+          return d.hasVehicle && d.passengerCapacity >= _minCapacity!;
+        });
+      }).toList();
+    }
+
+    final completedTrips = filteredTrips.reversed.toList();
+
+    return Scaffold(
+      body: FullPageBackground(
+        imageUrl: 'https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?q=80&w=1000',
+        overlayOpacity: 0.9,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(24, 0, 24, 100),
+          children: [
+            const SizedBox(height: 60),
+            const Center(child: CovoiTourLogo(size: 24)),
+            const SizedBox(height: 20),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('Historique', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white)),
+                IconButton(
+                  onPressed: () => setState(() => _showFilters = !_showFilters),
+                  icon: Icon(_showFilters ? Icons.filter_list_off : Icons.filter_list, color: const Color(0xFF24D58A)),
+                  tooltip: 'Filtrer l’historique',
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            const Text('Retrouvez tous les trajets validés du groupe.', style: TextStyle(color: Colors.white54)),
+            
+            if (_showFilters) _buildFilters(group),
+
+            const SizedBox(height: 24),
+            if (completedTrips.isEmpty)
+              _buildEmptyHistory()
+            else
+              ...completedTrips.map((trip) => _buildTripCard(trip, group)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFilters(group) {
+    return Container(
+      margin: const EdgeInsets.only(top: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text('Filtres', style: TextStyle(fontWeight: FontWeight.bold)),
+              if (_dateRange != null || _selectedMemberId != null || _minCapacity != null)
+                TextButton(
+                  onPressed: () => setState(() { _dateRange = null; _selectedMemberId = null; _minCapacity = null; }),
+                  child: const Text('Réinitialiser', style: TextStyle(color: Colors.redAccent, fontSize: 12)),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          // Date Range
+          OutlinedButton.icon(
+            onPressed: _pickDateRange,
+            icon: const Icon(Icons.date_range, size: 18),
+            label: Text(_dateRange == null ? 'Choisir une période' : 
+              '${DateFormat('dd/MM/yy').format(_dateRange!.start)} - ${DateFormat('dd/MM/yy').format(_dateRange!.end)}'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: _dateRange == null ? Colors.white70 : const Color(0xFF24D58A),
+              side: BorderSide(color: _dateRange == null ? Colors.white24 : const Color(0xFF24D58A)),
+            ),
+          ),
+          const SizedBox(height: 12),
+          // Member Select
+          DropdownButtonFormField<String>(
+            value: _selectedMemberId,
+            decoration: const InputDecoration(labelText: 'Par membre', prefixIcon: Icon(Icons.person_outline, size: 20)),
+            dropdownColor: const Color(0xFF0C192A),
+            items: [
+              const DropdownMenuItem(value: null, child: Text('Tous les membres')),
+              ...group.members.map((m) => DropdownMenuItem(value: m.id, child: Text(m.name))),
+            ],
+            onChanged: (val) => setState(() => _selectedMemberId = val),
+          ),
+          const SizedBox(height: 12),
+          // Capacity Select
+          DropdownButtonFormField<int>(
+            value: _minCapacity,
+            decoration: const InputDecoration(labelText: 'Par capacité voiture', prefixIcon: Icon(Icons.directions_car_outlined, size: 20)),
+            dropdownColor: const Color(0xFF0C192A),
+            items: [
+              const DropdownMenuItem(value: null, child: Text('Toutes les voitures')),
+              const DropdownMenuItem(value: 4, child: Text('4 places ou +')),
+              const DropdownMenuItem(value: 5, child: Text('5 places ou +')),
+              const DropdownMenuItem(value: 7, child: Text('7 places ou +')),
+            ],
+            onChanged: (val) => setState(() => _minCapacity = val),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _pickDateRange() async {
+    final picked = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime.now().subtract(const Duration(days: 365 * 5)),
+      lastDate: DateTime.now(),
+      initialDateRange: _dateRange,
+      builder: (context, child) => Theme(
+        data: Theme.of(context).copyWith(
+          colorScheme: Theme.of(context).colorScheme.copyWith(
+            primary: const Color(0xFF24D58A),
+            onPrimary: Colors.black,
+            surface: const Color(0xFF0C192A),
+            onSurface: Colors.white,
+          ),
+        ),
+        child: child!,
+      ),
+    );
+    if (picked != null) setState(() => _dateRange = picked);
+  }
+
+  Widget _buildEmptyHistory() {
+    return const Center(
+      child: Padding(
+        padding: EdgeInsets.only(top: 60),
+        child: Column(
+          children: [
+            Icon(Icons.history_toggle_off_rounded, size: 48, color: Colors.white10),
+            SizedBox(height: 16),
+            Text('Aucun trajet ne correspond à vos filtres.', style: TextStyle(color: Colors.white38)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTripCard(Trip trip, group) {
+    final state = ref.read(appStateProvider);
+    final driverNames = trip.confirmedDriverIds
+        .map((id) => group.members
+            .firstWhere((m) => m.id == id, orElse: () => Member(id: id, firstName: 'Inconnu', lastName: '', email: ''))
+            .name)
+        .join(', ');
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0C192A),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
+      ),
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+        leading: Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(color: const Color(0xFF24D58A).withValues(alpha: 0.1), shape: BoxShape.circle),
+          child: const Icon(Icons.event_available, color: Color(0xFF24D58A), size: 24),
+        ),
+        title: Text(
+          DateFormat('EEEE d MMMM yyyy', 'fr_FR').format(trip.date),
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
+        subtitle: Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Text(
+            'Conducteur(s) : $driverNames\n${trip.presentMemberIds.length} participants',
+            style: const TextStyle(color: Colors.white54, fontSize: 13),
+          ),
+        ),
+      ),
+    );
   }
 }
