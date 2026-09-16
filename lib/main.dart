@@ -522,42 +522,17 @@ class _CreateGroupScreenState extends ConsumerState<CreateGroupScreen> {
 
 class CovoiTourLogo extends StatelessWidget {
   final double size;
-  final bool showTagline;
 
-  const CovoiTourLogo({super.key, this.size = 32, this.showTagline = false});
+  const CovoiTourLogo({super.key, this.size = 32});
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Stack(
-              alignment: Alignment.center,
-              children: [
-                Icon(Icons.sync_rounded, color: const Color(0xFF24D58A), size: size * 1.2),
-                Icon(Icons.directions_car_filled_rounded, color: Colors.white, size: size * 0.6),
-              ],
-            ),
-            const SizedBox(width: 8),
-            RichText(
-              text: TextSpan(
-                style: TextStyle(fontSize: size * 0.9, fontWeight: FontWeight.w900, letterSpacing: -0.5),
-                children: const [
-                  TextSpan(text: 'Covoi', style: TextStyle(color: Colors.white)),
-                  TextSpan(text: 'Tour', style: TextStyle(color: Color(0xFF24D58A))),
-                ],
-              ),
-            ),
-          ],
-        ),
-        if (showTagline) ...[
-          const SizedBox(height: 2),
-          const Text('À qui le volant aujourd’hui ?', style: TextStyle(color: Color(0xFF24D58A), fontSize: 10, fontWeight: FontWeight.w600)),
-        ]
-      ],
+    return Image.asset(
+      'assets/images/logo_covoitour.png',
+      width: size,
+      height: size,
+      fit: BoxFit.contain,
+      semanticLabel: 'Logo CovoiTour',
     );
   }
 }
@@ -749,7 +724,7 @@ class DashboardScreen extends ConsumerWidget {
                       ],
                     ),
                     const SizedBox(height: 32),
-                    const Center(child: CovoiTourLogo(size: 48, showTagline: true)),
+                    const Center(child: CovoiTourLogo(size: 48)),
                   ],
                 ),
               ),

@@ -27,8 +27,16 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
+  flutter_launcher_icons: ^0.14.3
+
+flutter_launcher_icons:
+  android: true
+  image_path: assets/images/logo_covoitour.png
+  adaptive_icon_background: "#050C18"
+  adaptive_icon_foreground: assets/images/logo_covoitour.png
 
 flutter:
   uses-material-design: true
   assets:
     - assets/images/hebus_tech_logo.png
+    - assets/images/logo_covoitour.png

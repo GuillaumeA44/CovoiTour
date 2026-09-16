@@ -14,6 +14,9 @@ build/
 # Android local configuration
 android/.gradle/
 android/local.properties
+local.properties
+keystore.properties
+android/key.properties
 
 # Release artifacts
 *.apk
@@ -24,3 +27,15 @@ android/local.properties
 # Local secrets
 .env
 *.secret
+
+# Local editor and OS files
+.vscode/
+.fleet/
+.history/
+.DS_Store
+Thumbs.db
+
+# Temporary logs and files
+*.log
+*.tmp
+*.temp
