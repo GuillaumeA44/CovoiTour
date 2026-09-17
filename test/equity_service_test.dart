@@ -50,4 +50,43 @@ void main() {
       'large',
     );
   });
+
+  test('calcule equite, contribution et bonus de priorite', () {
+    final members = [
+      const Member(id: 'a', firstName: 'A', lastName: '', email: 'a@example.com', hasVehicle: true, passengerCapacity: 2),
+      const Member(id: 'f', firstName: 'F', lastName: '', email: 'f@example.com', hasVehicle: true, passengerCapacity: 2),
+    ];
+    final trips = [
+      Trip(
+        id: 'old-1',
+        date: DateTime(2026, 9, 1),
+        participants: const [
+          TripParticipant(memberId: 'a', status: AttendanceStatus.present),
+          TripParticipant(memberId: 'f', status: AttendanceStatus.present),
+        ],
+        confirmedDriverIds: const ['a'],
+      ),
+      Trip(
+        id: 'old-2',
+        date: DateTime(2026, 9, 2),
+        participants: const [
+          TripParticipant(memberId: 'a', status: AttendanceStatus.present),
+          TripParticipant(memberId: 'f', status: AttendanceStatus.present),
+        ],
+      ),
+    ];
+
+    final scores = service.calculatePriorityScores(
+      trips: trips,
+      members: members,
+      minimumDrivingPresenceThreshold: 10,
+    );
+
+    expect(scores['a']!.equity, closeTo(0.25, 0.001));
+    expect(scores['a']!.contribution, closeTo(0.5, 0.001));
+    expect(scores['f']!.presencesSinceLastDrive, 2);
+    expect(scores['f']!.priority, closeTo(0.2, 0.001));
+    expect(scores['f']!.finalScore, lessThan(scores['a']!.finalScore));
+    expect(scores['a']!.drivingRatio, closeTo(0.5, 0.001));
+  });
 }

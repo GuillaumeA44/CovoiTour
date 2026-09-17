@@ -211,6 +211,7 @@ class AppState extends ChangeNotifier {
     required String outboundTime,
     required String returnTime,
     List<int>? offDays,
+    int? minimumDrivingPresenceThreshold,
     String? imageData,
   }) {
     group.name = name;
@@ -221,6 +222,9 @@ class AppState extends ChangeNotifier {
     group.returnTime = returnTime;
     if (offDays != null) {
       group.offDays = offDays;
+    }
+    if (minimumDrivingPresenceThreshold != null) {
+      group.minimumDrivingPresenceThreshold = minimumDrivingPresenceThreshold.clamp(0, 99);
     }
     if (imageData != null) {
       group.imageData = imageData;
@@ -419,6 +423,8 @@ class AppState extends ChangeNotifier {
       members: activeMembers,
       scores: scores,
       lastDriveDate: (memberId) => _lastDriveDate(memberId),
+      history: group.trips.where((item) => item.confirmedDriverIds.isNotEmpty).toList(),
+      minimumDrivingPresenceThreshold: group.minimumDrivingPresenceThreshold,
     );
   }
 
@@ -426,11 +432,38 @@ class AppState extends ChangeNotifier {
     final trip = _nextTrip();
     final presentIds = trip.presentMemberIds;
     final scores = scoresFor(presentIds.length);
+    final equityScores = equityService.calculatePriorityScores(
+      trips: group.trips.where((item) => item.confirmedDriverIds.isNotEmpty).toList(),
+      members: activeMembers,
+      currentTrip: trip,
+      minimumDrivingPresenceThreshold: group.minimumDrivingPresenceThreshold,
+    );
+    final history = group.trips.where((item) => item.confirmedDriverIds.isNotEmpty).toList();
+    final presenceCounts = <String, int>{};
+    final driveCounts = <String, int>{};
+    for (final member in activeMembers) {
+      presenceCounts[member.id] = history.fold(
+          0, (count, item) => count + (item.presentMemberIds.contains(member.id) ? 1 : 0));
+      driveCounts[member.id] = history.fold(
+          0, (count, item) => count + (item.confirmedDriverIds.contains(member.id) ? 1 : 0));
+      if (presentIds.contains(member.id)) {
+        presenceCounts[member.id] = presenceCounts[member.id]! + 1;
+      }
+    }
     
     return _multiVehicleService.plan(
-      drivers: activeMembers,
+      drivers: activeMembers.where((member) => presentIds.contains(member.id)).toList(),
       passengerIds: presentIds,
       scores: scores,
+      finalScores: {
+        for (final entry in equityScores.entries) entry.key: entry.value.finalScore,
+      },
+      projectedDrivingRatios: {
+        for (final member in activeMembers)
+          if (presentIds.contains(member.id))
+            member.id: ((driveCounts[member.id] ?? 0) + 1) /
+                (presenceCounts[member.id] == 0 ? 1 : presenceCounts[member.id]!),
+      },
     );
   }
 
@@ -501,6 +534,10 @@ class AppState extends ChangeNotifier {
       participants: List.from(trip.participants),
       suggestedDriverIds: trip.suggestedDriverIds,
       confirmedDriverIds: confirmedDrivers,
+      passengerIdsByDriver: {
+        for (final assignment in plan.assignments)
+          assignment.driverId: List<String>.from(assignment.passengerIds),
+      },
     );
 
     _createNewTripAfter(trip);

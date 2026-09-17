@@ -15,6 +15,7 @@ class CarpoolGroup {
     required this.trips,
     required this.scoresByGroupSize,
     this.offDays = const [6, 7], // Samedi et Dimanche par défaut
+    this.minimumDrivingPresenceThreshold = 10,
     this.imageData,
     this.acknowledgedUnvalidatedTripIds = const [],
   });
@@ -31,6 +32,7 @@ class CarpoolGroup {
   final List<Trip> trips;
   final Map<int, Map<String, int>> scoresByGroupSize;
   List<int> offDays;
+  int minimumDrivingPresenceThreshold;
   String? imageData;
   List<String> acknowledgedUnvalidatedTripIds;
 
@@ -60,6 +62,8 @@ class CarpoolGroup {
           .toList(),
       scoresByGroupSize: scores,
       offDays: (json['offDays'] as List?)?.map((e) => e as int).toList() ?? const [6, 7],
+        minimumDrivingPresenceThreshold:
+          ((json['minimumDrivingPresenceThreshold'] as int?) ?? 10).clamp(0, 99),
       imageData: json['imageData'] as String?,
       acknowledgedUnvalidatedTripIds: (json['acknowledgedUnvalidatedTripIds'] as List? ?? []).map((e) => e as String).toList(),
     );
@@ -75,6 +79,7 @@ class CarpoolGroup {
         'returnTime': returnTime,
         'adminId': adminId,
         'offDays': offDays,
+        'minimumDrivingPresenceThreshold': minimumDrivingPresenceThreshold,
         'imageData': imageData,
         'acknowledgedUnvalidatedTripIds': acknowledgedUnvalidatedTripIds,
         'members': members
@@ -102,6 +107,7 @@ class CarpoolGroup {
                       .toList(),
                   'suggestedDriverIds': trip.suggestedDriverIds,
                   'confirmedDriverIds': trip.confirmedDriverIds,
+                  'passengerIdsByDriver': trip.passengerIdsByDriver,
                 })
             .toList(),
         'scoresByGroupSize': scoresByGroupSize.map(

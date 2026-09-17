@@ -28,6 +28,7 @@ class Trip {
     required this.participants,
     this.suggestedDriverIds = const [],
     this.confirmedDriverIds = const [],
+    this.passengerIdsByDriver = const {},
   });
 
   factory Trip.fromJson(Map<String, dynamic> json) => Trip(
@@ -42,6 +43,8 @@ class Trip {
         confirmedDriverIds: (json['confirmedDriverIds'] as List? ?? [])
             .map((e) => e as String)
             .toList(),
+        passengerIdsByDriver: (json['passengerIdsByDriver'] as Map<String, dynamic>? ?? {})
+          .map((key, value) => MapEntry(key, (value as List).map((item) => item as String).toList())),
       );
 
   final String id;
@@ -49,12 +52,14 @@ class Trip {
   final List<TripParticipant> participants;
   final List<String> suggestedDriverIds;
   final List<String> confirmedDriverIds;
+  final Map<String, List<String>> passengerIdsByDriver;
 
   Trip copyWith({
     DateTime? date,
     List<TripParticipant>? participants,
     List<String>? suggestedDriverIds,
     List<String>? confirmedDriverIds,
+    Map<String, List<String>>? passengerIdsByDriver,
   }) =>
       Trip(
         id: id,
@@ -62,6 +67,7 @@ class Trip {
         participants: participants ?? this.participants,
         suggestedDriverIds: suggestedDriverIds ?? this.suggestedDriverIds,
         confirmedDriverIds: confirmedDriverIds ?? this.confirmedDriverIds,
+        passengerIdsByDriver: passengerIdsByDriver ?? this.passengerIdsByDriver,
       );
 
   List<String> get presentMemberIds => participants

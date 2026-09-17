@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:intl/date_symbol_data_local.dart';
@@ -716,29 +717,38 @@ class DashboardScreen extends ConsumerWidget {
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
-                        Stack(
-                          clipBehavior: Clip.none,
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
                           children: [
-                            Container(
-                              padding: const EdgeInsets.all(8),
-                              decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(12)),
-                              child: IconButton(
-                                padding: EdgeInsets.zero,
-                                constraints: const BoxConstraints(),
-                                onPressed: () => _showPastTripNotifications(context, state.pastUnvalidatedTrips),
-                                icon: const Icon(Icons.notifications_none_rounded, color: Colors.white, size: 20),
-                              ),
+                            _HebusAboutButton(
+                              onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const EquityAboutScreen())),
                             ),
-                            if (state.pastUnvalidatedTrips.isNotEmpty)
-                              Positioned(
-                                right: -4,
-                                top: -6,
-                                child: CircleAvatar(
-                                  radius: 9,
-                                  backgroundColor: Colors.redAccent,
-                                  child: Text('${state.pastUnvalidatedTrips.length}', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
+                            const SizedBox(width: 8),
+                            Stack(
+                              clipBehavior: Clip.none,
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(12)),
+                                  child: IconButton(
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(),
+                                    onPressed: () => _showPastTripNotifications(context, state.pastUnvalidatedTrips),
+                                    icon: const Icon(Icons.notifications_none_rounded, color: Colors.white, size: 20),
+                                  ),
                                 ),
-                              ),
+                                if (state.pastUnvalidatedTrips.isNotEmpty)
+                                  Positioned(
+                                    right: -4,
+                                    top: -6,
+                                    child: CircleAvatar(
+                                      radius: 9,
+                                      backgroundColor: Colors.redAccent,
+                                      child: Text('${state.pastUnvalidatedTrips.length}', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
+                                    ),
+                                  ),
+                              ],
+                            ),
                           ],
                         ),
                       ],
@@ -1227,6 +1237,7 @@ class GroupScreen extends ConsumerWidget {
                       _InfoRow(label: 'Retour', value: group.returnTime),
                       const _InfoRow(label: 'Attente max', value: '5 min'),
                       _InfoRow(label: 'Règles du groupe', value: 'Voir ➔', isLink: true, onTap: () => _showRules(context)),
+                      _InfoRow(label: 'À propos de l’équité', value: 'Comprendre ➔', isLink: true, onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const EquityAboutScreen()))),
                     ],
                   ),
                   const SizedBox(height: 32),
@@ -1417,6 +1428,151 @@ class _InfoRow extends StatelessWidget {
 
 void _showRules(BuildContext context) {
   showDialog(context: context, builder: (context) => AlertDialog(title: const Text('Règles du groupe'), content: const Text('1. Soyez à l\'heure.\n2. Prévenez la veille.\n3. Conducteur choisi par équité.\n4. Partagez les frais.'), actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK'))]));
+}
+
+class EquityAboutScreen extends ConsumerWidget {
+  const EquityAboutScreen({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final threshold = ref.watch(appStateProvider).group.minimumDrivingPresenceThreshold;
+    return Scaffold(
+      appBar: AppBar(title: const Text('À propos de l’équité')),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+        children: [
+          const SizedBox(height: 8),
+          Center(
+            child: Column(
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(24),
+                  child: Image.asset(
+                    'assets/images/hebus_tech_logo.png',
+                    width: 132,
+                    height: 132,
+                    fit: BoxFit.cover,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'HebusTech',
+                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800, color: Colors.white),
+                ),
+                const SizedBox(height: 4),
+                const Text('L’équité expliquée simplement', style: TextStyle(color: Colors.white60)),
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
+          const Text(
+            'CovoiTour choisit les conducteurs en comparant les efforts réellement fournis par chaque membre. Le calcul utilise les présences et les trajets confirmés, pas seulement un tour de rôle fixe.',
+            style: TextStyle(color: Colors.white70, height: 1.45),
+          ),
+          const SizedBox(height: 20),
+          const _EquityAboutSection(
+            icon: Icons.balance_outlined,
+            title: '1. Score d’équité',
+            content: 'Pour chaque membre, CovoiTour calcule le coût réel de conduite : jours conduits / jours présents.\n\nScore d’équité = ratio de conduite du membre − ratio moyen du groupe\n\nUn score négatif signifie que le membre conduit moins souvent par présence que la moyenne et devient prioritaire. Un score positif signifie qu’il conduit davantage par présence.',
+          ),
+          const _EquityAboutSection(
+            icon: Icons.directions_car_outlined,
+            title: '2. Contribution du véhicule',
+            content: 'Chaque conduite ajoute le nombre de passagers transportés à la contribution du conducteur.\n\nScore de contribution = contribution du membre − contribution moyenne\n\nCe facteur reste volontairement léger : une grande voiture souvent utilisée est reconnue, sans annuler l’équité liée aux présences.',
+          ),
+          _EquityAboutSection(
+            icon: Icons.hourglass_bottom_outlined,
+            title: '3. Bonus de priorité',
+            content: threshold == 0
+                ? 'Le bonus de conduite minimale est désactivé. Aucun membre ne reçoit de priorité supplémentaire en fonction du nombre de présences sans conduire.'
+                : 'Le groupe applique actuellement un seuil de $threshold présence${threshold > 1 ? 's' : ''}.\n\nPrésences depuis la dernière conduite = nombre de présences depuis la dernière conduite confirmée\n\nBonus de priorité = présences depuis la dernière conduite / $threshold\n\nLe bonus réduit le score final et empêche qu’un membre reste passager indéfiniment. Une personne n’ayant jamais conduit accumule ce bonus dès ses premières présences.',
+          ),
+          const _EquityAboutSection(
+            icon: Icons.calculate_outlined,
+            title: '4. Score final',
+            content: 'Score final = score d’équité + (0,1 × score de contribution) − bonus de priorité\n\nScore d’équité = (jours conduits / jours présents) du membre − ratio moyen du groupe\nScore de contribution = contribution du membre − contribution moyenne\nBonus de priorité = présences depuis la dernière conduite / seuil configuré\n\nLe ratio de conduite est le facteur principal : le score final le plus faible est prioritaire. Les scores sont recalculés à partir de l’historique des trajets confirmés et de la présence du trajet à organiser.',
+          ),
+          const _EquityAboutSection(
+            icon: Icons.airline_seat_recline_normal_outlined,
+            title: '5. Choix des véhicules',
+            content: 'CovoiTour commence par les membres présents, actifs et disposant d’un véhicule disponible.\n\n1. Pour chaque conducteur présent, le ratio projeté est calculé ainsi : (jours conduits dans l’historique + 1) / (jours présents dans l’historique + présence du trajet à organiser). Le +1 représente la conduite proposée.\n\n2. Le logiciel recherche les combinaisons de véhicules capables de transporter tous les participants. Les capacités sont exprimées en places passager, hors conducteur. Il n’existe pas de nombre maximal fixe de voitures : le nombre nécessaire dépend de la taille du groupe et des capacités disponibles.\n\n3. Les combinaisons dont l’écart entre le ratio projeté le plus haut et le plus bas dépasse 0,10 sont écartées lorsqu’une combinaison équitable existe.\n\n4. La combinaison qui privilégie les ratios projetés les plus faibles est prioritaire afin de donner la conduite aux personnes ayant le moins conduit par rapport à leurs présences. Le nombre de véhicules puis la somme des scores finaux servent ensuite à départager les égalités.\n\n5. Les conducteurs retenus sont répartis avec les passagers jusqu’à ce que tout le groupe soit transporté.',
+          ),
+          const _EquityAboutSection(
+            icon: Icons.groups_outlined,
+            title: 'Ce que le calcul prend en compte',
+            content: '• présences réelles, y compris les rythmes à 25 %, 50 % ou 100 % ;\n• vacances, télétravail et absences, qui ne comptent pas comme présence ;\n• véhicules de capacités différentes ;\n• plusieurs voitures le même jour ;\n• nouveaux membres, qui commencent sans historique ;\n• grandes voitures, valorisées par une compensation légère ;\n• membres restés passagers pendant longtemps ;\n• disponibilité et capacité minimale du véhicule.',
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Le conducteur proposé reste une recommandation : une exception ponctuelle peut être décidée par le groupe, puis le trajet confirmé mettra automatiquement l’historique à jour.',
+            style: TextStyle(color: Colors.white.withValues(alpha: 0.6), height: 1.45, fontStyle: FontStyle.italic),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HebusAboutButton extends StatelessWidget {
+  const _HebusAboutButton({required this.onPressed});
+
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) => Tooltip(
+        message: 'À propos de l’équité',
+        child: InkWell(
+          onTap: onPressed,
+          borderRadius: BorderRadius.circular(12),
+          child: Ink(
+            width: 44,
+            height: 44,
+            padding: const EdgeInsets.all(5),
+            decoration: BoxDecoration(
+              color: Colors.white10,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.white12),
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Image.asset('assets/images/hebus_tech_logo.png', fit: BoxFit.cover),
+            ),
+          ),
+        ),
+      );
+    }
+
+class _EquityAboutSection extends StatelessWidget {
+  const _EquityAboutSection({required this.icon, required this.title, required this.content});
+
+  final IconData icon;
+  final String title;
+  final String content;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: const Color(0xFF0C192A),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.white10),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(icon, color: const Color(0xFF24D58A)),
+                const SizedBox(width: 10),
+                Expanded(child: Text(title, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold))),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Text(content, style: const TextStyle(color: Colors.white70, height: 1.45)),
+          ],
+        ),
+      );
 }
 
 class _MemberAvatar extends StatelessWidget {
@@ -2223,6 +2379,7 @@ class AdminScreen extends ConsumerStatefulWidget {
 
 class _AdminScreenState extends ConsumerState<AdminScreen> {
   late TextEditingController _name, _desc, _start, _end, _out, _ret;
+  late TextEditingController _minimumDrivingPresenceThreshold;
   String? _groupImageData;
 
   @override
@@ -2236,6 +2393,7 @@ class _AdminScreenState extends ConsumerState<AdminScreen> {
     _out = TextEditingController(text: g.outboundTime);
     _ret = TextEditingController(text: g.returnTime);
     _groupImageData = g.imageData;
+    _minimumDrivingPresenceThreshold = TextEditingController(text: '${g.minimumDrivingPresenceThreshold}');
   }
 
   @override
@@ -2246,6 +2404,7 @@ class _AdminScreenState extends ConsumerState<AdminScreen> {
     _end.dispose();
     _out.dispose();
     _ret.dispose();
+    _minimumDrivingPresenceThreshold.dispose();
     super.dispose();
   }
   @override
@@ -2323,7 +2482,29 @@ class _AdminScreenState extends ConsumerState<AdminScreen> {
         _DayChip(label: 'D', day: 7, isOff: state.group.offDays.contains(7), onToggle: (off) => _toggleDay(7, off)),
       ]),
       const SizedBox(height: 32),
-      FilledButton.icon(onPressed: () { state.updateGroup(name: _name.text, description: _desc.text, startPoint: _start.text, endPoint: _end.text, outboundTime: _out.text, returnTime: _ret.text, offDays: state.group.offDays, imageData: _groupImageData); ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Configuration du groupe enregistrée'))); }, icon: const Icon(Icons.save), label: const Text('Enregistrer tout')),
+      Text('Conduite minimale', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+      TextFormField(
+        controller: _minimumDrivingPresenceThreshold,
+        keyboardType: TextInputType.number,
+        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+        decoration: const InputDecoration(
+          labelText: 'Présences sans conduire avant priorité',
+          helperText: '0 désactive la conduite minimale (0 à 99)',
+        ),
+        validator: (value) {
+          final threshold = int.tryParse(value ?? '');
+          return threshold == null || threshold < 0 || threshold > 99
+              ? 'Saisissez un nombre entre 0 et 99'
+              : null;
+        },
+      ),
+      const SizedBox(height: 32),
+      FilledButton.icon(onPressed: () {
+        final threshold = int.tryParse(_minimumDrivingPresenceThreshold.text);
+        if (threshold == null || threshold < 0 || threshold > 99) return;
+        state.updateGroup(name: _name.text, description: _desc.text, startPoint: _start.text, endPoint: _end.text, outboundTime: _out.text, returnTime: _ret.text, offDays: state.group.offDays, minimumDrivingPresenceThreshold: threshold, imageData: _groupImageData);
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Configuration du groupe enregistrée')));
+      }, icon: const Icon(Icons.save), label: const Text('Enregistrer tout')),
     ]);
   }
   Future<void> _showAdminTransferDialog(BuildContext context, WidgetRef ref, List<Member> candidates) async {
