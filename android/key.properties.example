@@ -1,0 +1,6 @@
+# Copy this file to android/key.properties and fill in your own release keystore values.
+# Never commit the real file or the keystore.
+storePassword=YOUR_STORE_PASSWORD
+keyPassword=YOUR_KEY_PASSWORD
+keyAlias=covoi_tour_release
+storeFile=C:/path/to/covoi-tour-release.jks
