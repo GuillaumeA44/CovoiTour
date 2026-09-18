@@ -187,17 +187,27 @@ class _CreateGroupScreenState extends ConsumerState<CreateGroupScreen> {
 
     return Scaffold(
       body: FullPageBackground(
-        imageUrl: 'https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?q=80&w=1000',
+        imageUrl: 'https://images.unsplash.com/photo-1549317661-bd32c8ce0db2?q=85&w=1600',
         child: SafeArea(
           child: ListView(
             padding: const EdgeInsets.fromLTRB(24, 40, 24, 40),
             children: [
-              const Center(child: CovoiTourLogo(size: 28)),
-              const SizedBox(height: 40),
-              const Text('Créer votre groupe', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
+              const Center(child: CovoiTourLogo(size: 104)),
+              const SizedBox(height: 24),
+              const Center(
+                child: Text(
+                  'Créer votre groupe',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 36, fontWeight: FontWeight.bold),
+                ),
+              ),
               const SizedBox(height: 8),
-              const Text('Le créateur du groupe devient automatiquement son administrateur.', style: TextStyle(color: Colors.white70)),
-              const SizedBox(height: 32),
+              const Text(
+                'Le créateur du groupe devient automatiquement son administrateur.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white70),
+              ),
+              const SizedBox(height: 28),
               if (account == null)
                 _buildSignInCard(state)
               else
@@ -265,7 +275,20 @@ class _CreateGroupScreenState extends ConsumerState<CreateGroupScreen> {
             const Text('Connectez-vous avec Google pour devenir le propriétaire du groupe et synchroniser ses données.', style: TextStyle(color: Colors.white70)),
             const SizedBox(height: 16),
             FilledButton.icon(
-              onPressed: () => state.signIn(),
+              onPressed: () async {
+                try {
+                  final account = await state.signIn();
+                  if (!mounted || account != null) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Connexion Google annulée.')),
+                  );
+                } catch (error) {
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Connexion Google impossible : $error')),
+                  );
+                }
+              },
               icon: const Icon(Icons.login),
               label: const Text('Se connecter à Google'),
             ),

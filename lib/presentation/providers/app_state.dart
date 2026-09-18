@@ -85,7 +85,7 @@ class AppState extends ChangeNotifier {
     );
   }
 
-  Future<void> signIn() => _authService.signIn();
+  Future<GoogleSignInAccount?> signIn() => _authService.signIn();
   Future<void> signOut() => _authService.signOut();
 
   Future<bool> createGroup({
