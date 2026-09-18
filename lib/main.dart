@@ -187,7 +187,8 @@ class _CreateGroupScreenState extends ConsumerState<CreateGroupScreen> {
 
     return Scaffold(
       body: FullPageBackground(
-        imageUrl: 'https://images.unsplash.com/photo-1549317661-bd32c8ce0db2?q=85&w=1600',
+        imageAsset: 'assets/images/fond_ecran_creer_groupe.png',
+        overlayOpacity: 0.62,
         child: SafeArea(
           child: ListView(
             padding: const EdgeInsets.fromLTRB(24, 40, 24, 40),
@@ -589,8 +590,9 @@ class CovoiTourLogo extends StatelessWidget {
 }
 
 class FullPageBackground extends StatelessWidget {
-  const FullPageBackground({super.key, required this.imageUrl, required this.child, this.overlayOpacity = 0.85});
-  final String imageUrl;
+  const FullPageBackground({super.key, this.imageUrl, this.imageAsset, required this.child, this.overlayOpacity = 0.85});
+  final String? imageUrl;
+  final String? imageAsset;
   final Widget child;
   final double overlayOpacity;
 
@@ -598,7 +600,11 @@ class FullPageBackground extends StatelessWidget {
   Widget build(BuildContext context) {
     return Stack(
       children: [
-        Positioned.fill(child: Image.network(imageUrl, fit: BoxFit.cover, errorBuilder: (_, __, ___) => Container(color: const Color(0xFF050C18)))),
+        Positioned.fill(
+          child: imageAsset != null
+              ? Image.asset(imageAsset!, fit: BoxFit.cover)
+              : Image.network(imageUrl!, fit: BoxFit.cover, errorBuilder: (_, __, ___) => Container(color: const Color(0xFF050C18))),
+        ),
         Positioned.fill(
           child: Container(
             decoration: BoxDecoration(
