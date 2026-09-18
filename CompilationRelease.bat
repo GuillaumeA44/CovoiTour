@@ -1,24 +1,42 @@
 @echo off
 setlocal EnableExtensions
 
-set "FLUTTER_COMMAND=flutter"
-set "ADB_PATH=%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe"
+:: 1. Recherche de Flutter - Priorite aux chemins connus
+set "FLUTTER_COMMAND="
 
-if exist "C:\src\flutter\bin\flutter.bat" (
+if exist "C:\flutter\bin\flutter.bat" (
+    set "FLUTTER_COMMAND=C:\flutter\bin\flutter.bat"
+) else if exist "C:\src\flutter\bin\flutter.bat" (
     set "FLUTTER_COMMAND=C:\src\flutter\bin\flutter.bat"
 ) else (
-    where "%FLUTTER_COMMAND%" >nul 2>&1
-    if errorlevel 1 (
-        echo [ERREUR] Flutter est introuvable dans le PATH et dans C:\src\flutter.
-        echo Installez Flutter ou adaptez FLUTTER_COMMAND dans ce script.
-        pause
-        exit /b 1
+    :: Si non trouve dans les chemins classiques, on cherche dans le PATH
+    where flutter >nul 2>&1
+    if not errorlevel 1 (
+        set "FLUTTER_COMMAND=flutter"
     )
 )
 
-if not exist "%ADB_PATH%" (
-    echo [AVERTISSEMENT] ADB introuvable : %ADB_PATH%
-    echo La compilation peut continuer, mais le transfert USB ne sera pas disponible.
+if "%FLUTTER_COMMAND%"=="" (
+    echo [ERREUR] Flutter est introuvable.
+    echo Veuillez installer Flutter dans C:\flutter ou l'ajouter a votre PATH.
+    pause
+    exit /b 1
+)
+
+:: 2. Recherche dynamique de l'ADB (Android Debug Bridge)
+set "ADB_PATH=adb"
+where %ADB_PATH% >nul 2>&1
+if errorlevel 1 (
+    if exist "%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe" (
+        set "ADB_PATH=%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe"
+    ) else (
+        set "ADB_PATH="
+    )
+)
+
+if "%ADB_PATH%"=="" (
+    echo [AVERTISSEMENT] ADB introuvable.
+    echo La compilation peut continuer, mais le transfert USB automatique echouera.
 )
 
 echo [1/2] Recuperation des dependances...
